@@ -9,5 +9,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: import.meta.env.VITE_BASE_URL || '/YMS-Dash',
+  // base: import.meta.env.VITE_BASE_URL || '/YMS-Dash',
 })

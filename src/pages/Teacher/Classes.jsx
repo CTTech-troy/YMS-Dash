@@ -4,7 +4,7 @@ import { UserIcon, BookOpenIcon, CheckIcon, XIcon, CalendarIcon, ClipboardListIc
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext'; 
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com';
 
 // (Removed local fallback sample STUDENTS_DATA — students come from the backend)
 
@@ -26,8 +26,8 @@ const TeacherClasses = () => {
   const staffIdFromAuth = currentUser?.uid || currentUser?.id || localStorage.getItem('uid') || null;
   const staffNameFromAuth = currentUser?.displayName || currentUser?.name || localStorage.getItem('name') || null;
 
-  // Vite env — set VITE_API_URL in frontend/.env (example: VITE_API_URL=http://localhost:5000)
-  const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+  // Vite env — set VITE_API_URL in frontend/.env (example: VITE_API_URL=https://yms-backend-lp9y.onrender.com)
+  const API_BASE = (import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com').replace(/\/$/, '');
   // backend mounts subjects router at /api/subjects (see backend/src/index.js)
   const SUBJECTS_BASE = `${API_BASE}/api/subjects`;
   // students & teachers endpoints

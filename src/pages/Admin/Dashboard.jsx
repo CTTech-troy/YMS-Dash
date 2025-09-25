@@ -44,7 +44,7 @@ const notifications = [{
   time: '2 days ago',
   read: false
 }];
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com/';
 const AdminDashboard = () => {
   const [events, setEvents] = useState(initialEvents);
   const [showAddEventModal, setShowAddEventModal] = useState(false);

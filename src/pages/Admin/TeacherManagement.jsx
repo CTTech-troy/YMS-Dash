@@ -5,7 +5,7 @@ import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Add API base (use Vite env variable if present)
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com';
 
 // Provide a userRecord object (use real auth/user data in production)
 const userRecord = (typeof window !== 'undefined' && window.userRecord) ? window.userRecord : { uid: 'system' };
@@ -102,7 +102,7 @@ const TeacherManagement = () => {
           ...t,
           initPassword: t.initPassword ?? t.password ?? '',
         })) : [];
-        setTeachers(mapped);
+        setTeachers(sortByName(mapped));
       } catch (err) {
         console.error(err);
         toast.error('Could not load teachers from server.');
@@ -125,7 +125,7 @@ const TeacherManagement = () => {
 
       // try parse JSON (some backends may return text)
       let data;
-      try { data = rawText ? JSON.parse(rawText) : []; } catch (e) { data = rawText; }
+      try { data = rawText ? JSON.parse(rawText) : []; } catch { data = rawText; }
 
       // Normalize shapes into array
       let rawAdmins = [];
@@ -354,7 +354,7 @@ const TeacherManagement = () => {
       } else {
         console.log('Payload (to be sent):', fields);
       }
-      
+
       // front-end validation to avoid backend 400s
       if (entityType === 'admin') {
         if (!fields.name || !String(fields.name).trim()) {
@@ -367,7 +367,6 @@ const TeacherManagement = () => {
           toast.error('Email is required for admins.');
           return;
         }
-        // phone can be optional — backend may accept empty, but warn user
         if (!fields.phone || !String(fields.phone).trim()) {
           toast.warning('No phone provided for admin. You can add it later.');
         }
@@ -377,30 +376,8 @@ const TeacherManagement = () => {
 
       const baseEndpoint = entityType === 'admin' ? `${API_BASE}/api/admins/` : `${API_BASE}/api/teachers`;
 
-      // send FormData only when a file is attached, otherwise JSON
-      if (pictureFileRef.current) {
-        const form = new FormData();
-        Object.entries(fields).forEach(([k, v]) => {
-          if (v === undefined || v === null) return;
-          form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
-        });
-        form.append('picture', pictureFileRef.current, pictureFileRef.current.name);
-        const res = await fetch(baseEndpoint, { method: 'POST', body: form });
-        if (!res.ok) throw new Error(`Create failed (${res.status}) ${await res.text().catch(()=>'')}`);
-      } else {
-        const res = await fetch(baseEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fields)
-        });
-        if (!res.ok) {
-          const json = await res.json().catch(()=>null);
-          const text = json ? JSON.stringify(json) : await res.text().catch(()=>'');
-          throw new Error(`Create failed (${res.status}) ${text}`);
-        }
-      }
-
-      // success handling (keep your existing logic)
+      // ---- IMPORTANT: single request path ----
+      // Decide update vs create once and perform exactly one HTTP call below.
       if (editableTeacher.id) {
         // Updating existing record
         if (pictureFileRef.current) {
@@ -418,7 +395,7 @@ const TeacherManagement = () => {
           }
           const updated = await res.json();
           const mappedUpdated = { ...updated, initPassword: updated.initPassword ?? updated.password ?? '' };
-          if (entityType === 'teacher') setTeachers(prev => prev.map(t => (t.id === mappedUpdated.id ? mappedUpdated : t)));
+          if (entityType === 'teacher') setTeachers(prev => sortByName(prev.map(t => (t.id === mappedUpdated.id ? mappedUpdated : t))));
           else await fetchAdmins(); // refresh admins after admin update
         } else {
           const res = await fetch(`${baseEndpoint}/${editableTeacher.id}`, {
@@ -432,12 +409,12 @@ const TeacherManagement = () => {
           }
           const updated = await res.json();
           const mappedUpdated = { ...updated, initPassword: updated.initPassword ?? updated.password ?? '' };
-          if (entityType === 'teacher') setTeachers(prev => prev.map(t => (t.id === mappedUpdated.id ? mappedUpdated : t)));
-          else await fetchAdmins(); // refresh admins after admin update
+          if (entityType === 'teacher') setTeachers(prev => sortByName(prev.map(t => (t.id === mappedUpdated.id ? mappedUpdated : t))));
+          else await fetchAdmins();
         }
         toast.success('Teacher updated successfully!');
       } else {
-        // Creating new record
+        // Creating new record (single create request)
         if (pictureFileRef.current) {
           const form = new FormData();
           Object.entries(fields).forEach(([k, v]) => {
@@ -454,14 +431,13 @@ const TeacherManagement = () => {
           const created = await res.json();
           const mappedCreated = { ...created, initPassword: created.initPassword ?? created.password ?? '' };
           if (entityType === 'teacher') {
-            setTeachers(prev => [mappedCreated, ...prev]);
+            setTeachers(prev => sortByName([mappedCreated, ...prev]));
             toast.success('New teacher added successfully!');
           } else {
             toast.success('New admin added successfully!');
-            await fetchAdmins(); // <-- refresh admins table after creating admin
+            await fetchAdmins();
           }
         } else {
-          // send JSON when no file present so express.json() can parse it
           const res = await fetch(baseEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -475,11 +451,11 @@ const TeacherManagement = () => {
           const created = await res.json();
           const mappedCreated = { ...created, initPassword: created.initPassword ?? created.password ?? '' };
           if (entityType === 'teacher') {
-            setTeachers(prev => [mappedCreated, ...prev]);
+            setTeachers(prev => sortByName([mappedCreated, ...prev]));
             toast.success('New teacher added successfully!');
           } else {
             toast.success('New admin added successfully!');
-            await fetchAdmins(); // <-- refresh admins table after creating admin
+            await fetchAdmins();
           }
         }
       }
@@ -526,15 +502,13 @@ const TeacherManagement = () => {
   return (
     <DashboardLayout title="Teacher Management">
       {/* Header with Add Teacher button */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
         <h1 className="text-2xl font-semibold text-gray-900">Teachers</h1>
-        <div className="flex items-center space-x-3">
-          <button type="button" onClick={handleAddTeacher} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            <PlusIcon className="h-5 w-5 mr-2" />
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={handleAddTeacher} className="inline-flex items-center px-3 py-2 sm:px-4 sm:py-2 border border-transparent text-sm sm:text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <PlusIcon className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
             Add Teacher
           </button>
-
-
         </div>
       </div>
 
@@ -565,147 +539,129 @@ const TeacherManagement = () => {
 
       {/* Teacher Table */}
       <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qualifications</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredTeachers.map(teacher => (
-              <tr key={teacher.id}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10">
-                      <img className="h-12 w-12 rounded-full object-cover" src={teacher.picture ? `data:image/jpeg;base64,${teacher.picture}` : "/placeholder.png"} alt="" />
-                    </div>
-                    <div className="ml-4">
-                      <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
-                      <div className="text-sm text-gray-500">{teacher.uid}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">{teacher.email}</div>
-                  <div className="text-sm text-gray-500">{teacher.phone}</div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">{teacher.qualifications}</div>
-                  <div className="text-sm text-gray-500">{teacher.yearsOfExperience} years experience</div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${teacher.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {teacher.status === 'active' ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button onClick={() => handleViewTeacher(teacher)} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View">
-                    <EyeIcon className="h-5 w-5" />
-                  </button>
-                  <button onClick={() => handleViewTeacher(teacher, true)} className="text-indigo-600 hover:text-indigo-900 mr-3" aria-label="Edit">
-                    <PencilIcon className="h-5 w-5" />
-                  </button>
-                  <button onClick={() => handleDeleteTeacher(teacher.id)} className="text-red-600 hover:text-red-900" aria-label="Delete">
-                    <TrashIcon className="h-5 w-5" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {filteredTeachers.length === 0 && (
-              <tr>
-                <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-500">No teachers found matching your search.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div> {/* end teachers table wrapper */}
-
-      <div className="mt-8">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-semibold text-gray-900">Admins</h2>
-          <div className="flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={() => {
-                handleAddAdmin(); // existing function should set entityType='admin' and open modal
-                fetchAdmins(); // optional: ensure latest when opening
-              }}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-            >
-              <PlusIcon className="h-5 w-5 mr-2" />
-              Add Admin
-            </button>
-
-            {/* <button
-              type="button"
-              onClick={fetchAdmins}
-              title="Refresh admins"
-              className="inline-flex items-center px-3 py-2 border border-gray-200 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-            >
-              Refresh
-            </button> */}
-          </div>
-        </div>
-
-        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+        {/* make table horizontally scrollable on small devices */}
+        <div className="w-full overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin UID</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-4 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
+                <th className="px-4 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                <th className="px-4 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Qualifications</th>
+                <th className="px-4 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2 text-right text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {adminsLoading ? (
-                <tr>
-                  <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">Loading admins…</td>
-                </tr>
-              ) : admins.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">No admins found.</td>
-                </tr>
-              ) : (
-                admins.map(a => (
-                  <tr key={a.uid || a.id || a.AdminUid}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10">
-                          <img className="h-10 w-10 rounded-full object-cover" src={a.img ? (a.img.startsWith('data:') ? a.img : `data:image/jpeg;base64,${a.img}`) : "/placeholder.png"} alt="" />
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{a.name}</div>
-                        </div>
+              {filteredTeachers.map(teacher => (
+                <tr key={teacher.id}>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10 sm:h-12 sm:w-12">
+                        <img className="h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover" src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"} alt="" />
                       </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{a.email}</div>
-                      <div className="text-sm text-gray-500">{a.phoneNumber || a.phone || '—'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{a.AdminUid || a.adminUid || '—'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button onClick={() => { setEntityType('admin'); handleViewTeacher(a); }} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View">
-                        <EyeIcon className="h-5 w-5" />
+                      <div className="ml-3">
+                        <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
+                        <div className="text-sm text-gray-500">{teacher.uid}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{teacher.email}</div>
+                    <div className="text-sm text-gray-500">{teacher.phone}</div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{teacher.qualifications}</div>
+                    <div className="text-sm text-gray-500">{teacher.yearsOfExperience} years</div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${teacher.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {teacher.status === 'active' ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => handleViewTeacher(teacher)} className="text-blue-600 hover:text-blue-900" aria-label="View">
+                        <EyeIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </button>
-                      <button onClick={() => { setEntityType('admin'); handleViewTeacher(a, true); }} className="text-indigo-600 hover:text-indigo-900 mr-3" aria-label="Edit">
-                        <PencilIcon className="h-5 w-5" />
+                      <button onClick={() => handleViewTeacher(teacher, true)} className="text-indigo-600 hover:text-indigo-900" aria-label="Edit">
+                        <PencilIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </button>
-                      <button onClick={() => handleDeleteAdmin(a.uid || a.id)} className="text-red-600 hover:text-red-900" aria-label="Delete">
-                        <TrashIcon className="h-5 w-5" />
+                      <button onClick={() => handleDeleteTeacher(teacher.id)} className="text-red-600 hover:text-red-900" aria-label="Delete">
+                        <TrashIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </button>
-                    </td>
-                  </tr>
-                ))
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filteredTeachers.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="px-4 py-4 text-center text-sm text-gray-500">No teachers found matching your search.</td>
+                </tr>
               )}
             </tbody>
           </table>
+        </div>
+      </div> {/* end teachers table wrapper */}
+
+      {/* Admins table — also wrapped for horizontal scrolling */}
+      <div className="mt-8">
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+          <div className="w-full overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin UID</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {adminsLoading ? (
+                  <tr>
+                    <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">Loading admins…</td>
+                  </tr>
+                ) : admins.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">No admins found.</td>
+                  </tr>
+                ) : (
+                  admins.map(a => (
+                    <tr key={a.uid || a.id || a.AdminUid}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10">
+                            <img className="h-10 w-10 rounded-full object-cover" src={a.img ? (a.img.startsWith('data:') ? a.img : `data:image/jpeg;base64,${a.img}`) : "/placeholder.png"} alt="" />
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">{a.name}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{a.email}</div>
+                        <div className="text-sm text-gray-500">{a.phoneNumber || a.phone || '—'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{a.AdminUid || a.adminUid || '—'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onClick={() => { setEntityType('admin'); handleViewTeacher(a); }} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View">
+                          <EyeIcon className="h-5 w-5" />
+                        </button>
+                        <button onClick={() => { setEntityType('admin'); handleViewTeacher(a, true); }} className="text-indigo-600 hover:text-indigo-900 mr-3" aria-label="Edit">
+                          <PencilIcon className="h-5 w-5" />
+                        </button>
+                        <button onClick={() => handleDeleteAdmin(a.uid || a.id)} className="text-red-600 hover:text-red-900" aria-label="Delete">
+                          <TrashIcon className="h-5 w-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -715,7 +671,7 @@ const TeacherManagement = () => {
           {/* Backdrop */}
           <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity z-40" onClick={() => { setShowViewModal(false); setIsEditing(false); setEditableTeacher(null); setShowPassword(false); }} />
           <div className="flex items-center justify-center min-h-screen p-4 text-center">
-            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all w-full max-w-full sm:max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               {/* hidden file input */}
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
@@ -970,32 +926,24 @@ const TeacherManagement = () => {
                       type="button"
                       onClick={handleSave}
                       disabled={isSaving}
-                      className={`w-full inline-flex items-center justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${isSaving ? 'opacity-80 cursor-not-allowed' : ''}`}
+                      className={`w-full sm:auto inline-flex items-center justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${isSaving ? 'opacity-80 cursor-not-allowed' : ''}`}
                     >
-                      {isSaving ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                          </svg>
-                          Saving...
-                        </>
-                      ) : 'Save'}
+                      {isSaving ? 'Saving...' : 'Save'}
                     </button>
 
                     <button
                       type="button"
                       onClick={handleCancelEdit}
                       disabled={isSaving}
-                      className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                      className="mt-3 w-full sm:mt-0 sm:ml-3 sm:w-auto inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:text-sm"
                     >
                       Cancel
                     </button>
                   </>
                 ) : (
                   <>
-                    <button type="button" onClick={handleEditClick} className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm">Edit Teacher</button>
-                    <button type="button" className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm" onClick={() => { setShowViewModal(false); setIsEditing(false); setEditableTeacher(null); setShowPassword(false); }}>Close</button>
+                    <button type="button" onClick={handleEditClick} className="w-full sm:w-auto inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:text-sm">Edit Teacher</button>
+                    <button type="button" className="mt-3 w-full sm:mt-0 sm:ml-3 sm:w-auto inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50" onClick={() => { setShowViewModal(false); setIsEditing(false); setEditableTeacher(null); setShowPassword(false); }}>Close</button>
                   </>
                 )}
               </div>
@@ -1008,3 +956,10 @@ const TeacherManagement = () => {
 };
 
 export default TeacherManagement;
+
+// Helper: stable case-insensitive sort by name
+const sortByName = (arr = []) => {
+  return arr.slice().sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' })
+  );
+};

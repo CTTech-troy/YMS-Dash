@@ -4,7 +4,7 @@ import DashboardLayout from '../../components/DashboardLayout';
 import { PlusIcon, PencilIcon, TrashIcon, EyeIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com';
 
 const StudentManagement = () => {
   const [students, setStudents] = useState([]);

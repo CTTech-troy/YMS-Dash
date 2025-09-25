@@ -80,6 +80,7 @@ const TeacherResults = () => {
   const [subjects, setSubjects] = useState([]);
   const [formData, setFormData] = useState({
     studentId: '',
+    studentuid: '',
     session: '',
     term: '',
     subjects: [],
@@ -127,7 +128,7 @@ const TeacherResults = () => {
         const res = await api.get('/api/subjects');
         const raw = res.data;
         if (typeof raw === 'string' && raw.trim().startsWith('<')) {
-          throw new Error('Invalid response from http://localhost:5000/api/subjects (HTML received).');
+          throw new Error('Invalid response from http://localhohttps://yms-backend-lp9y.onrender.comst:5000/api/subjects (HTML received).');
         }
         const arr = Array.isArray(raw)
           ? raw
@@ -210,8 +211,12 @@ const TeacherResults = () => {
     let mounted = true;
     const fetchStudents = async () => {
       try {
-        const res = await fetch('/api/students');
-        const data = await res.json();
+        const res = await api.get('/api/students');
+        const raw = res.data;
+        if (typeof raw === 'string' && raw.trim().startsWith('<')) {
+          throw new Error('Students API returned HTML (check server or baseURL).');
+        }
+        const data = Array.isArray(raw) ? raw : (Array.isArray(raw.data) ? raw.data : (Array.isArray(raw.students) ? raw.students : []));
         if (!mounted) return;
         setAllStudents(data || []);
 
@@ -225,50 +230,71 @@ const TeacherResults = () => {
         }
       } catch (err) {
         console.error('Failed to fetch students', err);
+        toast.error('Failed to load students. Check server/API base URL.');
       }
     };
     fetchStudents();
     return () => { mounted = false; };
   }, [currentUser, teacherAssignedClass, showAddModal]);
 
-  // Load results with publish rules:
-  // - students: see only results where published === true
-  // - teachers: see results for their assigned class (including unpublished)
-  // - admins/others: see all results
-  useEffect(() => {
-    const loadResults = async () => {
-      try {
-        const res = await fetch('/api/results');
-        const data = await res.json();
-        const all = data || [];
-
-        if (isStudent) {
-          const published = all.filter(r => r.published === true || String(r.published) === 'true' || r.published === 1);
-          setResults(published);
-          return;
-        }
-
-        if (isTeacher) {
-          // show results only for students in the teacher's assigned class (include unpublished)
-          const filtered = all.filter(r => {
-            const st = allStudents.find(s => String(s.id) === String(r.studentId) || String(s.uid) === String(r.studentId));
-            if (!st) return false;
-            return normalizeClass(st.class || '') === normalizeClass(teacherAssignedClass || '');
-          });
-          setResults(filtered);
-          return;
-        }
-
-        // admin / others see everything
-        setResults(all);
-      } catch (err) {
-        console.error('Failed to load results', err);
+  // --- UPDATED: load results from explicit backend URL and filter strictly by staffuid === currentUser.uid ---
+  const loadResults = async () => {
+    try {
+      // use the full URL you provided to avoid baseURL mismatch returning HTML
+      const res = await api.get('https://yms-backend-lp9y.onrender.com/api/results');
+      const raw = res.data;
+      console.log("error rom the api", res)
+      if (typeof raw === 'string' && raw.trim().startsWith('<')) {
+        throw new Error('Results API returned HTML (check server or baseURL).');
       }
-    };
 
-    loadResults();
-    // Depend on allStudents so teacher-filtering works once students are loaded
-  }, [allStudents, currentUser, teacherAssignedClass]);
+      const allRaw = Array.isArray(raw)
+        ? raw
+        : (Array.isArray(raw.data) ? raw.data : (Array.isArray(raw.results) ? raw.results : []));
+
+        // normalize each result so the UI can rely on consistent fields
+      const all = (allRaw || []).map(r => ({
+        id: r.id || r._id || r.resultId || (r.ref && r.ref.id) || '',
+        studentId: r.studentId || r.studentIdRef || r.student_id || r.student || '',
+        studentUid: r.studentUid || r.studentuid || r.student_uid || r.studentUidFromBackend || '',
+        session: r.session || r.academicSession || '',
+        term: r.term || '',
+        subjects: Array.isArray(r.subjects) ? r.subjects : (Array.isArray(r.data?.subjects) ? r.data.subjects : []),
+        teacherUid: r.teacherUid || r.teacherUid || r.teacher || r.staffuid || r.staffUid || r.createdBy || '',
+        commentStatus: !!r.commentStatus || !!r.teacherComment,
+        teacherComment: r.teacherComment || r.comment || '',
+        published: r.published,
+        createdAt: r.createdAt || r.created_at || r.created || ''
+      }));
+
+        // teacher: show only results created by logged-in teacher (match staffuid/teacherUid)
+      if (isTeacher && currentUser?.uid) {
+        const uid = String(currentUser.uid);
+        const filtered = all.filter(r => String(r.teacherUid || r.staffuid || r.staffUid || '') === uid);
+        // newest first
+        setResults(filtered.sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+        return;
+      }
+
+      // Students: only published results
+      if (isStudent) {
+        const published = all.filter(r => r.published === true || String(r.published) === 'true' || r.published === 1);
+        setResults(published);
+        return;
+      }
+       const published = all.filter(r => r.published === true || String(r.published) === 'true' || String(r.published) === 'yes' || r.published === 'yes');
+    setResults(published.sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+    } catch (err) {
+      console.error('Failed to load results', err);
+      toast.error('Failed to load results. Check server/API URL.');
+    }
+};
+
+// call loader when user available (keeps real-time refresh after save because handleSubmit calls loadResults)
+useEffect(() => {
+  if (!currentUser) return;
+  loadResults();
+}, [currentUser]);
 
   // Calculate overall grade for a result
   const calculateOverallGrade = subjectsArr => {
@@ -280,6 +306,17 @@ const TeacherResults = () => {
   };
 
   // small normalizers reused from Attendance page
+
+  // Normalizes student picture to a valid image src or returns a default avatar
+  const normalizeStudentPicture = (pic) => {
+    if (!pic || typeof pic !== 'string') return '/images/default-avatar.png';
+    // If base64 image
+    if (pic.startsWith('data:image')) return pic;
+    // If URL or relative path
+    if (pic.startsWith('http') || pic.startsWith('/')) return pic;
+    // Otherwise, fallback to default avatar
+    return '/images/default-avatar.png';
+  };
 
   const normalizeClass = (v) =>
     (v ?? "")
@@ -337,7 +374,8 @@ const TeacherResults = () => {
             id: String(s.id || s._id || s.uid || Math.random().toString(36).slice(2,9)),
             uid: String(s.uid || s.studentUid || s.id || ''),
             name: s.name || s.fullName || s.studentName || 'Unnamed',
-            picture: s.picture || s.avatar || '/images/default-avatar.png',
+            // convert base64 or other picture values into a proper src
+            picture: normalizeStudentPicture(s.picture || s.avatar || s.image || ''),
             class: detectedClass,
             raw: s
           };
@@ -386,14 +424,61 @@ const TeacherResults = () => {
     fetchClassStudents();
   }, [currentUser, results, showAddModal]);
 
+  // Helper: fetch a single student record from API by id or uid
+  const fetchStudentById = async (id) => {
+    if (!id) return null;
+    try {
+      // Try direct endpoint first (backend may accept id or uid)
+      const res = await api.get(`/api/students/${encodeURIComponent(id)}`);
+      const raw = res.data;
+      if (typeof raw === 'string' && raw.trim().startsWith('<')) {
+        throw new Error('Student API returned HTML (check server URL).');
+      }
+      // API may return object or array
+      const student = Array.isArray(raw) ? raw[0] : raw;
+      if (!student) return null;
+      return {
+        id: String(student.id || student._id || student.uid || ''),
+        uid: String(student.uid || student.studentUid || student.student_id || student.id || ''),
+        name: student.name || student.fullName || student.studentName || 'Unnamed',
+        class: student.class || student.studentClass || student.className || '',
+        raw: student
+      };
+    } catch (err) {
+      // Fallback: try searching cached lists
+      const fromAll = allStudents.find(s => String(s.id) === String(id) || String(s.uid) === String(id));
+      if (fromAll) return fromAll;
+      const fromClass = classStudents.find(s => String(s.id) === String(id) || String(s.uid) === String(id));
+      if (fromClass) return fromClass;
+      console.debug('fetchStudentById failed, returning null:', err?.message || err);
+      return null;
+    }
+  };
+
   // Handle form input changes for student selection
   const handleStudentChange = e => {
     const studentId = e.target.value;
     setFormData(prev => ({ ...prev, studentId }));
-    // prefer classStudents for teachers (only their assigned class)
+
+    // Resolve selected student from local lists first for immediate UI response
     const sourceList = isTeacher ? classStudents : allStudents;
-    const found = sourceList.find(s => String(s.id) === String(studentId) || String(s.uid) === String(studentId));
-    setSelectedStudent(found || null);
+    const localFound = sourceList.find(s => String(s.id) === String(studentId) || String(s.uid) === String(studentId));
+    if (localFound) {
+      setSelectedStudent(localFound);
+      setFormData(prev => ({ ...prev, studentuid: localFound.uid || String(studentId) }));
+    } else {
+      setSelectedStudent(null);
+      setFormData(prev => ({ ...prev, studentuid: '' }));
+    }
+
+    // Fetch authoritative student record (UID) from API and update form data
+    (async () => {
+      const fetched = await fetchStudentById(studentId);
+      if (fetched) {
+        setSelectedStudent(fetched);
+        setFormData(prev => ({ ...prev, studentuid: fetched.uid || String(studentId) }));
+      }
+    })();
   };
 
   // Handle form input changes for general fields
@@ -480,8 +565,14 @@ const TeacherResults = () => {
     // ensure we always send a teacher identifier the backend expects
     const teacherUid = currentUser?.uid || currentUser?.id || localStorage.getItem('uid') || null;
 
+    // Resolve student UID (e.g. "YMS-2501") to send to the backend
+    const resolvedStudent = selectedStudent || findStudentById(formData.studentId);
+    const studentUid = resolvedStudent?.uid || resolvedStudent?.studentUid || resolvedStudent?.id || String(formData.studentId);
+
     const payload = {
       studentId: formData.studentId,
+      studentuid: studentUid,       // <-- ensure student's UID (YMS-2501) is saved to the DB
+      studentUid: studentUid,       // <-- include common alternate key just in case backend expects camelCase
       session: formData.session,
       term: formData.term,
       subjects: formData.subjects,
@@ -495,11 +586,15 @@ const TeacherResults = () => {
 
     try {
       await api.post('/api/results', payload);
-      toast.success('Result saved (unpublished). Admin must publish to make it visible.');
+      // Publication is handled separately; just confirm save to the teacher
+      toast.success('Result saved.');
+
+      // Refresh results so the newly saved result appears immediately in the dashboard
+      await loadResults();
 
       // Keep local UI behaviour: remove added student from selection lists so they can't be re-added in the UI
-      setClassStudents(prev => prev.filter(s => String(s.id) !== String(formData.studentId) && String(s.uid) !== String(formData.studentId)));
-      setAllStudents(prev => prev.filter(s => String(s.id) !== String(formData.studentId) && String(s.uid) !== String(formData.studentId)));
+      setClassStudents(prev => prev.filter(s => String(s.id) !== String(formData.studentId) && String(s.uid) !== String(formData.studentId) && String(s.uid) !== String(studentUid)));
+      setAllStudents(prev => prev.filter(s => String(s.id) !== String(formData.studentId) && String(s.uid) !== String(formData.studentId) && String(s.uid) !== String(studentUid)));
 
       // reset form and close modal
       setFormData({
@@ -540,18 +635,33 @@ const TeacherResults = () => {
     setShowCommentModal(true);
   };
 
-  // Save comment
-  const handleSaveComment = () => {
+  // Save teacher comment to backend and update local state
+  const handleSaveComment = async () => {
     if (!selectedResult) return;
-    const updatedResults = results.map(result => {
-      if (result.id === selectedResult.id) {
-        return { ...result, teacherComment: comment, commentStatus: comment.trim() !== '' };
-      }
-      return result;
-    });
-    setResults(updatedResults);
-    setShowCommentModal(false);
-    toast.success('Comment saved successfully!');
+    try {
+      const id = selectedResult.id || selectedResult._id;
+      if (!id) throw new Error('Result id missing');
+
+      const payload = {
+        teacherComment: comment,
+        commentStatus: comment.trim() !== ''
+      };
+
+      // Backend expects PUT for updateResult route — use PUT (not PATCH)
+      const res = await api.put(`/api/results/${encodeURIComponent(id)}`, payload);
+      const updatedResult = res?.data || { ...selectedResult, ...payload };
+
+      // Update local results array and selectedResult with returned document
+      setResults(prev => prev.map(r => (String(r.id || r._id) === String(id) ? { ...r, ...updatedResult } : r)));
+      setSelectedResult(prev => (prev && (String(prev.id || prev._id) === String(id))) ? { ...prev, ...updatedResult } : prev);
+
+      setShowCommentModal(false);
+      toast.success('Comment saved successfully!');
+    } catch (err) {
+      console.error('Failed to save comment', err);
+      const msg = err?.response?.data?.message || 'Failed to update comment. Check server.';
+      toast.error(msg);
+    }
   };
 
   // Helper: show only subjects registered by the teacher when a student views a result card
@@ -600,27 +710,45 @@ const TeacherResults = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">picture</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student Uid</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Term</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Percentage & Grade</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comment Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overall</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comment</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {results.map((result, idx) => {
-                // Calculate overall grade and percentage for display
+                // Prefer resolving by studentId, fallback to studentUid
+                const studentRecord = findStudentById(result.studentId) || findStudentById(result.studentUid) || { name: 'Unknown student', uid: result.studentUid || result.studentId || '' };
+                const avatarSrc = normalizeStudentPicture(studentRecord?.picture);
                 const { percentage, grade } = calculateOverallGrade(result.subjects);
+
                 return (
                   <tr key={result.id || idx}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{result.session}</div>
+                      <div className="text-sm text-gray-900">
+                        <img
+                          src={avatarSrc}
+                          alt={studentRecord.name || 'student'}
+                          className="h-10 w-10 rounded-full object-cover"
+                        />
+                      </div>
                     </td>
+
+                    {/* Student name + UID */}
                     <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{studentRecord.name}</div>
+                      <div className="text-xs text-gray-500">{studentRecord.uid}</div>
+                    </td>
+
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{result.session}</div>
                       <div className="text-sm text-gray-500">{result.term}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{result.subjects.length} subjects</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{Array.isArray(result.subjects) ? result.subjects.length : 0} subjects</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{percentage}%</div>
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${grade === 'A+' || grade === 'A' ? 'bg-green-100 text-green-800' : grade === 'B' ? 'bg-blue-100 text-blue-800' : grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>Grade {grade}</span>
@@ -649,7 +777,7 @@ const TeacherResults = () => {
               })}
               {results.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500">No results found. Click "Add Result" to add a new result.</td>
+                  <td colSpan="7" className="px-6 py-4 text-center text-sm text-gray-500">No results found. Click "Add Result" to add a new result.</td>
                 </tr>
               )}
             </tbody>
@@ -730,16 +858,16 @@ const TeacherResults = () => {
                               <tr key={subject.id}>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{subject.name}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" min="0" max="10" step="1" value={subject.firstTest} onChange={e => handleSubjectScoreChange(subject.id, 'firstTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number" step="1" value={subject.firstTest} onChange={e => handleSubjectScoreChange(subject.id, 'firstTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" min="0" max="10" step="1" value={subject.secondTest} onChange={e => handleSubjectScoreChange(subject.id, 'secondTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number" step="1" value={subject.secondTest} onChange={e => handleSubjectScoreChange(subject.id, 'secondTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" min="0" max="10" step="1" value={subject.thirdTest} onChange={e => handleSubjectScoreChange(subject.id, 'thirdTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number" step="1" value={subject.thirdTest} onChange={e => handleSubjectScoreChange(subject.id, 'thirdTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" min="0" max="70" step="1" value={subject.exam} onChange={e => handleSubjectScoreChange(subject.id, 'exam', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number" step="1" value={subject.exam} onChange={e => handleSubjectScoreChange(subject.id, 'exam', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{subject.total}</td>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td>

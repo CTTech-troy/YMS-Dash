@@ -16,7 +16,8 @@ const availableClasses = [
   'Primary 4',
   'Primary 5',
   'JSS1',
-  'JSS2'
+  'JSS2',
+  'Principal'
 ];
 
 const ClassAssignment = () => {
@@ -30,7 +31,7 @@ const ClassAssignment = () => {
     class: ''
   });
 
-  const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+  const API_BASE = (import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com/').replace(/\/$/, '');
  
    // 🔄 Fetch teachers from DB
    useEffect(() => {
@@ -182,17 +183,37 @@ const ClassAssignment = () => {
 
   // Helper: ensure image src is a proper data URI or passthrough URL
   const formatImageSrc = src => {
-    // follow TeacherManagement approach: if we have a base64 payload (no data: prefix)
-    // assume jpeg and return a data URI; otherwise passthrough or use placeholder
     if (!src) return '/placeholder.png';
     const s = String(src).trim();
-    if (s.startsWith('data:') || s.startsWith('http') || s.startsWith('/')) return s;
-    // crude base64 detection
-    const base64Like = /^[A-Za-z0-9+/=\s]+$/;
-    if (base64Like.test(s) && s.length > 50) {
-      return `data:image/jpeg;base64,${s.replace(/\s+/g, '')}`;
+
+    // already a data URL
+    if (s.startsWith('data:')) return s;
+
+    // absolute URL or root-relative path
+    if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
+
+    // contains "base64," but missing the data: prefix (e.g. "image/png;base64,AAA...")
+    if (s.includes('base64,')) {
+      // if starts directly with "base64," prepend default mime
+      if (s.startsWith('base64,')) {
+        return `data:image/jpeg;${s}`; // default to jpeg
+      }
+      // if it already looks like "image/png;base64,..." but missing "data:" prefix
+      if (!s.startsWith('data:')) {
+        return `data:${s}`;
+      }
+      return s;
     }
-    return s;
+
+    // raw base64 without "base64," marker -> detect and wrap
+    const base64Only = s.replace(/\s+/g, '');
+    const isBase64Like = base64Only.length > 50 && /^[A-Za-z0-9+/=]+$/.test(base64Only);
+    if (isBase64Like) {
+      return `data:image/jpeg;base64,${base64Only}`;
+    }
+
+    // fallback
+    return '/placeholder.png';
   };
 
   if (loading) {
@@ -244,7 +265,8 @@ const ClassAssignment = () => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-10 w-10">
-                        <img className="h-12 w-12 rounded-full object-cover" src={formatImageSrc(teacher.picture)} alt={teacher.name || 'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'} />
+                        <img className="h-12 w-12 rounded-full object-cover" 
+                        src={teacher.picture ? `data:image/jpeg;base64,${teacher.picture}` : "/placeholder.png"}/>
                       </div>
                       <div className="ml-4">
                         <div className="text-sm font-medium text-gray-900">

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import axios from "axios";
 import { useAuth } from "../../contexts/AuthContext";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_URL || "https://yms-backend-lp9y.onrender.com";
 
 const Attendance = () => {
   const { currentUser } = useAuth(); // Logged-in teacher
@@ -45,7 +45,7 @@ const Attendance = () => {
         // 1) determine assigned class: prefer currentUser, then teacher record fallback
         let assignedClass = currentUser.assignedClass || currentUser.assignedClassName || localStorage.getItem('assignedClass') || "";
         try {
-          const tRes = await axios.get(`http://localhost:5000/api/teachers/${encodeURIComponent(currentUser.uid)}`);
+          const tRes = await axios.get(`${API_BASE}/api/teachers/${encodeURIComponent(currentUser.uid)}`);
           const tData = tRes.data;
           const teacher = Array.isArray(tData) ? tData[0] : tData;
           assignedClass = teacher?.assignedClass || teacher?.assignedClassName || teacher?.class || assignedClass;
@@ -59,7 +59,7 @@ const Attendance = () => {
         const assignedClassNorm = normalizeClass(assignedClass || "");
 
         // 2) fetch students (handle array or { students: [...] } shapes)
-        const sRes = await axios.get(`http://localhost:5000/api/students`);
+        const sRes = await axios.get(`${API_BASE}/api/students`);
         const raw = sRes.data;
         const studentsArray = Array.isArray(raw) ? raw : (Array.isArray(raw.students) ? raw.students : (Array.isArray(raw.data) ? raw.data : []));
         console.log('Raw students count:', studentsArray.length);
@@ -104,27 +104,32 @@ const Attendance = () => {
   const loadAttendanceForDate = async (dateStr) => {
     try {
       const map = {};
+      if (!students || students.length === 0) {
+        setAttendance({});
+        return;
+      }
       // query backend per student for that date (uses ?date=YYYY-MM-DD)
       const promises = students.map(async (s) => {
         const sid = s.id || s._id || s.uid;
         if (!sid) return;
         try {
-          const res = await axios.get(`http://localhost:5000/api/attendance/${encodeURIComponent(sid)}?date=${encodeURIComponent(dateStr)}`);
+          const res = await axios.get(`${API_BASE}/api/attendance/${encodeURIComponent(sid)}?date=${encodeURIComponent(dateStr)}`);
           const records = Array.isArray(res.data) ? res.data : [];
           // if record exists, set present/absent based on latest record.status
           if (records.length > 0) {
             const latest = records[0];
             map[sid] = latest.status === 'present';
           } else {
-            map[sid] = true; // default to present when no record exists
+            // default to absent — teacher should mark present explicitly
+            map[sid] = false;
           }
         } catch (err) {
           // treat 404 as no record
           if (err?.response?.status === 404) {
-            map[sid] = true;
+            map[sid] = false;
           } else {
             console.warn('Attendance fetch failed for id=', sid, err?.message || err);
-            map[sid] = true; // fallback
+            map[sid] = false; // fallback default absent
           }
         }
       });
@@ -250,7 +255,7 @@ const Attendance = () => {
         try {
           console.debug('Requesting attendance for candidate id:', candidate);
           const res = await axios.get(
-            `http://localhost:5000/api/attendance/${encodeURIComponent(candidate)}${attendanceDate ? `?date=${encodeURIComponent(attendanceDate)}` : ''}`
+            `${API_BASE}/api/attendance/${encodeURIComponent(candidate)}${attendanceDate ? `?date=${encodeURIComponent(attendanceDate)}` : ''}`
           );
           const data = res.data;
 

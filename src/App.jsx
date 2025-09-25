@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/auth/Login';
+import AdminRegister from './pages/auth/admin';
 import AdminDashboard from './pages/Admin/Dashboard';
 import TeacherDashboard from './pages/Teacher/Dashboard';
 import TeacherManagement from './pages/Admin/TeacherManagement';
@@ -16,7 +17,6 @@ import Attendance from './pages/Teacher/Attendance';
 import TeacherProfile from './pages/Teacher/Profile';
 import ResultChecker from './pages/Student/ResultChecker';
 import { Toaster } from 'sonner';
-import AdminRegister from './pages/auth/admin';
 // Protected route component that checks user authentication and role
 const ProtectedRoute = ({
   children,

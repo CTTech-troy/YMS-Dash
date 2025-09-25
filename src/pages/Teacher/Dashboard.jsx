@@ -4,7 +4,7 @@ import { UsersIcon, BookOpenIcon, ClipboardListIcon, CalendarIcon, BellIcon } fr
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com';
 
 // Sample fallback data
 const fallbackAssignedClass = {

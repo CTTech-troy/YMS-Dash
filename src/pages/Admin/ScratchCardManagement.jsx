@@ -5,7 +5,7 @@ import { PlusIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-r
 import { toast } from 'sonner';
 import axios from 'axios';
 
-const API_URL = "http://localhost:5000/api/scratch-cards"; // 🔥 update if deployed
+const API_URL = "https://yms-backend-lp9y.onrender.com/api/scratch-cards"; // 🔥 update if deployed
 
 const ScratchCardManagement = () => {
   const [cards, setCards] = useState([]);
