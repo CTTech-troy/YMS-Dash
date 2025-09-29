@@ -44,7 +44,7 @@ const notifications = [{
   time: '2 days ago',
   read: false
 }];
-const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com/';
+const API_BASE = import.meta.env.VITE_API_URL;
 const AdminDashboard = () => {
   const [events, setEvents] = useState(initialEvents);
   const [showAddEventModal, setShowAddEventModal] = useState(false);
@@ -111,7 +111,7 @@ const AdminDashboard = () => {
         const students = normalizeArray(sJson);
 
         // debug if students exist but not shown
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.debug('Teachers response (raw):', tJson);
           console.debug('Students response (raw):', sJson);
           console.debug('Normalized students count:', students.length);

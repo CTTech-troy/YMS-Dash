@@ -13,8 +13,7 @@ const SubjectManagement = () => {
   const [teacherSubjects, setTeacherSubjects] = useState([]);
   const [modalAnimateIn, setModalAnimateIn] = useState(false);
   const [noAssignment, setNoAssignment] = useState(false);
-  const API_BASE = (import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com').replace(/\/$/, '');
-
+  const API_BASE = import.meta.env.VITE_API_URL
   // Load subjects from backend and group by teacher
   useEffect(() => {
     let mounted = true;

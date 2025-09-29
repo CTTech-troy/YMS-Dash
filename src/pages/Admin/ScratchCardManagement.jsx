@@ -5,7 +5,9 @@ import { PlusIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-r
 import { toast } from 'sonner';
 import axios from 'axios';
 
-const API_URL = "https://yms-backend-lp9y.onrender.com/api/scratch-cards"; // 🔥 update if deployed
+const API_URL = "https://yms-backend-a2x4.onrender.com/api/scratch-cards"; // 🔥 update if deployed
+
+// const API_URL = import.meta.env.VITE_API_URL;
 
 const ScratchCardManagement = () => {
   const [cards, setCards] = useState([]);
@@ -17,15 +19,54 @@ const ScratchCardManagement = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const cardsPerPage = 10;
 
-  // ✅ Fetch cards from backend
+  // helper functions to avoid runtime errors when fields are missing
+  const safeToString = (v) => (v === undefined || v === null ? '' : String(v));
+  const formatDate = (d) => {
+    if (!d) return '-';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '-';
+    return dt.toISOString().split('T')[0];
+  };
+  const getCardId = (card) => (card && (card.id || card._id || card._id_str)) || '';
+
+  // ✅ Fetch cards from backend (robust parsing)
   const fetchCards = async () => {
     try {
       setLoading(true);
       const res = await axios.get(API_URL);
-      setCards(res.data);
+      const payload = res?.data;
+
+      // Normalize various possible response shapes to an array
+      let items = [];
+      if (Array.isArray(payload)) {
+        items = payload;
+      } else if (payload && Array.isArray(payload.data)) {
+        items = payload.data;
+      } else if (payload && Array.isArray(payload.cards)) {
+        items = payload.cards;
+      } else if (payload && Array.isArray(payload.items)) {
+        items = payload.items;
+      } else if (payload && Array.isArray(payload.result)) {
+        items = payload.result;
+      } else {
+        // fallback: if payload is an object representing a single card, wrap it
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          // detect single-card object (has pin/serialNumber)
+          if (payload.pin || payload.serialNumber || payload.status) {
+            items = [payload];
+          } else {
+            items = [];
+          }
+        } else {
+          items = [];
+        }
+      }
+
+      setCards(items);
     } catch (err) {
       console.error("❌ Error fetching cards:", err);
       toast.error("Error fetching scratch cards");
+      setCards([]);
     } finally {
       setLoading(false);
     }
@@ -34,6 +75,11 @@ const ScratchCardManagement = () => {
   useEffect(() => {
     fetchCards();
   }, []);
+
+  // reset page when filters/search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterStatus, cards.length]);
 
   // ✅ Handle input change
   const handleInputChange = (e) => {
@@ -51,7 +97,8 @@ const ScratchCardManagement = () => {
 
     try {
       const res = await axios.post(`${API_URL}/generate`, { quantity });
-      setCards([...res.data, ...cards]); // prepend new cards
+      const newCards = Array.isArray(res.data) ? res.data : (res.data?.cards || []);
+      setCards([...newCards, ...cards]); // prepend new cards
       setShowGenerateModal(false);
       toast.success(`${quantity} scratch cards generated successfully!`);
     } catch (err) {
@@ -65,7 +112,7 @@ const ScratchCardManagement = () => {
     if (!confirm('Are you sure you want to delete this card?')) return;
     try {
       await axios.delete(`${API_URL}/${id}`);
-      setCards(cards.filter((card) => card.id !== id));
+      setCards(cards.filter((card) => getCardId(card) !== id));
       toast.success('Card deleted successfully!');
     } catch (err) {
       console.error("❌ Error deleting card:", err);
@@ -74,11 +121,12 @@ const ScratchCardManagement = () => {
   };
 
   // 🔍 Search + Filter
-  const filteredCards = cards.filter(card => {
-    const matchesSearch =
-      card.pin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      card.serialNumber.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = filterStatus ? card.status === filterStatus : true;
+  const filteredCards = (Array.isArray(cards) ? cards : []).filter(card => {
+    const pinStr = safeToString(card?.pin).toLowerCase();
+    const serialStr = safeToString(card?.serialNumber).toLowerCase();
+    const q = safeToString(searchQuery).toLowerCase();
+    const matchesSearch = q === '' ? true : pinStr.includes(q) || serialStr.includes(q);
+    const matchesStatus = filterStatus ? (card?.status === filterStatus) : true;
     return matchesSearch && matchesStatus;
   });
 
@@ -88,6 +136,10 @@ const ScratchCardManagement = () => {
   const currentCards = filteredCards.slice(indexOfFirstCard, indexOfLastCard);
   const totalPages = Math.ceil(filteredCards.length / cardsPerPage);
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
+  // compute user-friendly range
+  const showingStart = filteredCards.length === 0 ? 0 : indexOfFirstCard + 1;
+  const showingEnd = Math.min(indexOfLastCard, filteredCards.length);
 
   return (
     <DashboardLayout title="Scratch Card Management">
@@ -148,7 +200,7 @@ const ScratchCardManagement = () => {
         <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
           <h3 className="text-lg leading-6 font-medium text-gray-900">Scratch Cards</h3>
           <p className="text-sm text-gray-500">
-            Showing {indexOfFirstCard + 1}-{Math.min(indexOfLastCard, filteredCards.length)} of {filteredCards.length} cards
+            Showing {showingStart}-{showingEnd} of {filteredCards.length} cards
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -168,18 +220,18 @@ const ScratchCardManagement = () => {
                 <tr><td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500">Loading...</td></tr>
               ) : currentCards.length > 0 ? (
                 currentCards.map((card) => (
-                  <tr key={card.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{card.serialNumber}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><span className="font-mono">{card.pin}</span></td>
+                  <tr key={getCardId(card) || Math.random()}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{safeToString(card.serialNumber) || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><span className="font-mono">{safeToString(card.pin) || '-'}</span></td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${card.status === 'unused' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                         {card.status === 'unused' ? 'Unused' : 'Used'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{card.generatedAt.split('T')[0]}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{card.usedBy || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(card.generatedAt)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{safeToString(card.usedBy) || '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button onClick={() => handleDeleteCard(card.id)} className="text-red-600 hover:text-red-900">
+                      <button onClick={() => handleDeleteCard(getCardId(card))} className="text-red-600 hover:text-red-900">
                         <TrashIcon className="h-5 w-5" />
                       </button>
                     </td>
@@ -208,8 +260,8 @@ const ScratchCardManagement = () => {
             <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm text-gray-700">
-                  Showing <span className="font-medium">{indexOfFirstCard + 1}</span> to{' '}
-                  <span className="font-medium">{Math.min(indexOfLastCard, filteredCards.length)}</span> of{' '}
+                  Showing <span className="font-medium">{showingStart}</span> to{' '}
+                  <span className="font-medium">{showingEnd}</span> of{' '}
                   <span className="font-medium">{filteredCards.length}</span> results
                 </p>
               </div>

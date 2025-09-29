@@ -31,7 +31,7 @@ const ClassAssignment = () => {
     class: ''
   });
 
-  const API_BASE = (import.meta.env.VITE_API_URL || 'https://yms-backend-lp9y.onrender.com/').replace(/\/$/, '');
+  const API_BASE = (import.meta.env.VITE_API_URL);
  
    // 🔄 Fetch teachers from DB
    useEffect(() => {

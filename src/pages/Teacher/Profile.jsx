@@ -4,7 +4,7 @@ import { UserIcon, MailIcon, PhoneIcon, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://yms-backend-lp9y.onrender.com";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const TeacherProfile = () => {
   const { currentUser } = useAuth();

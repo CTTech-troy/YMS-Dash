@@ -128,7 +128,7 @@ const TeacherResults = () => {
         const res = await api.get('/api/subjects');
         const raw = res.data;
         if (typeof raw === 'string' && raw.trim().startsWith('<')) {
-          throw new Error('Invalid response from http://localhohttps://yms-backend-lp9y.onrender.comst:5000/api/subjects (HTML received).');
+          throw new Error('Invalid response from https://yms-backend-a2x4.onrender.com (HTML received).');
         }
         const arr = Array.isArray(raw)
           ? raw
@@ -241,7 +241,7 @@ const TeacherResults = () => {
   const loadResults = async () => {
     try {
       // use the full URL you provided to avoid baseURL mismatch returning HTML
-      const res = await api.get('https://yms-backend-lp9y.onrender.com/api/results');
+      const res = await api.get('https://yms-backend-a2x4.onrender.com/api/results');
       const raw = res.data;
       console.log("error rom the api", res)
       if (typeof raw === 'string' && raw.trim().startsWith('<')) {
