@@ -4,7 +4,7 @@ import { UsersIcon, BookOpenIcon, ClipboardListIcon, CalendarIcon, BellIcon } fr
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
 
 // Sample fallback data
 const fallbackAssignedClass = {
@@ -291,9 +291,9 @@ const TeacherDashboard = () => {
             <p className="text-sm text-gray-500">
               {teacherProfile?.email || '—'}
             </p>
-            <p className="text-sm text-gray-500">
+            {/* <p className="text-sm text-gray-500">
               {teacherProfile?.subject ? `Subject: ${teacherProfile.subject}` : ''}
-            </p>
+            </p> */}
           </div>
         </div>
       </div>

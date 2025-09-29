@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import axios from "axios";
 import { useAuth } from "../../contexts/AuthContext";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_URL || " https://yms-backend-a2x4.onrender.com";
 
 const Attendance = () => {
   const { currentUser } = useAuth(); // Logged-in teacher
