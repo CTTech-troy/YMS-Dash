@@ -205,6 +205,7 @@ const TeacherProfile = () => {
     }
     setLoading(true);
     try {
+      // Step 1: Change password through auth route
       const res = await fetch(`${API_BASE}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -214,14 +215,39 @@ const TeacherProfile = () => {
           newPassword: pwdForm.newPassword,
         }),
       });
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         toast.error(err.message || "Failed to change password");
-      } else {
-        toast.success("Password changed successfully");
-        setShowChangePwd(false);
-        setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+        return;
       }
+
+      // Step 2: Update teacher profile with new "initialPassword"
+      try {
+        const putRes = await fetch(`${API_BASE}/api/teachers/${encodeURIComponent(teacherId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initialPassword: pwdForm.newPassword }),
+        });
+
+        if (putRes.ok) {
+          const updated = await putRes.json().catch(() => ({}));
+          // merge returned update into form state if present
+          const merged = { ...formData, ...(updated || {}) };
+          setFormData(merged);
+          setOriginalData(merged);
+        } else {
+          // non-critical: backend didn't accept initialPassword update
+          const err = await putRes.json().catch(() => ({}));
+          console.warn("Failed to update teacher initialPassword:", err);
+        }
+      } catch (err) {
+        console.error("Failed to PUT initialPassword", err);
+      }
+
+      toast.success("Password changed successfully");
+      setShowChangePwd(false);
+      setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
     } catch (err) {
       console.error("change pwd error", err);
       toast.error("Failed to change password");
@@ -305,17 +331,8 @@ const TeacherProfile = () => {
                       {avatarPreview ? (
                         <img src={avatarPreview} alt="avatar" className="h-full w-full object-cover" />
                       ) : formData.pictureSrc ? (
-<img
-  src={
-    formData.pictureSrc
-      ? formData.pictureSrc.startsWith("data:")
-        ? formData.pictureSrc          // already a full data URL
-        : `data:image/jpeg;base64,${formData.pictureSrc}` // raw base64
-      : "/images/default-avatar.png"   // fallback image
-  }
-  alt="avatar"
-  className="h-full w-full object-cover"
-/>
+                        <img
+                        src={ formData.pictureSrc ? formData.pictureSrc.startsWith("data:") ? formData.pictureSrc : `data:image/jpeg;base64,${formData.pictureSrc}` : "/images/default-avatar.png"}alt="avatar"className="h-full w-full object-cover"/>
                       ) : (
                         <div className="flex items-center justify-center h-full w-full text-gray-400">
                           <UserIcon />

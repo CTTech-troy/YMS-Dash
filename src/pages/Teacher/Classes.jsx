@@ -60,7 +60,6 @@ const TeacherClasses = () => {
       // try to determine teacher UID and assigned class
       const uid = staffIdFromAuth || localStorage.getItem('uid');
       let assignedClass = currentUser?.assignedClass || localStorage.getItem('assignedClass') || null;
-      // ensure component state reflects any stored value early
       setAssignedClass(assignedClass);
 
       if (uid) {
@@ -74,7 +73,6 @@ const TeacherClasses = () => {
             const tData = await tRes.json();
             const teacher = Array.isArray(tData) ? tData[0] : tData;
             assignedClass = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClass || currentUser?.assignedClass;
-            // persist to component state so UI (Add Subject) can use it
             setAssignedClass(assignedClass);
           }
         } catch (err) {
@@ -82,21 +80,62 @@ const TeacherClasses = () => {
         }
       }
 
-      // Fetch students from API (API may return all students). Normalize, log each student's class,
-      // then filter client-side to only those whose class matches the teacher's assignedClass.
+      // Try server-side class filter when we have an assignedClass to reduce payload
       try {
-        const studentsUrl = `${STUDENTS_BASE}`; // fetch all, backend may support ?class but we handle both
-        const sRes = await fetch(studentsUrl);
-        if (!sRes.ok) {
-          const body = await sRes.text().catch(() => null);
-          console.error('Students fetch failed', { studentsUrl, status: sRes.status, body });
-          throw new Error('Students fetch failed');
+        let studentsData = [];
+        if (assignedClass) {
+          const enc = encodeURIComponent(assignedClass);
+          // Try primary query param name "class"
+          const tryUrls = [
+            `${STUDENTS_BASE}?class=${enc}`,
+            `${STUDENTS_BASE}?studentClass=${enc}`,
+            `${STUDENTS_BASE}?grade=${enc}`
+          ];
+
+          let sRes = null;
+          let usedUrl = null;
+          for (const u of tryUrls) {
+            try {
+              sRes = await fetch(u);
+              if (sRes.ok) {
+                usedUrl = u;
+                break;
+              }
+            } catch (e) {
+              // network error for this attempt, try next
+              console.warn('Students fetch attempt failed for', u, e);
+            }
+          }
+
+          if (sRes && sRes.ok) {
+            studentsData = await sRes.json().catch(() => []);
+            // normalize response shape
+            studentsData = Array.isArray(studentsData) ? studentsData : (studentsData.students || studentsData.data || []);
+          } else {
+            // server did not support filtered query or all attempts failed — fall back to fetching all
+            const sAllRes = await fetch(`${STUDENTS_BASE}`);
+            if (!sAllRes.ok) {
+              const body = await sAllRes.text().catch(() => null);
+              console.error('Students fetch failed', { url: `${STUDENTS_BASE}`, status: sAllRes.status, body });
+              throw new Error('Students fetch failed');
+            }
+            const raw = await sAllRes.json().catch(() => []);
+            studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
+          }
+        } else {
+          // No assignedClass — fetch all students
+          const sRes = await fetch(`${STUDENTS_BASE}`);
+          if (!sRes.ok) {
+            const body = await sRes.text().catch(() => null);
+            console.error('Students fetch failed', { studentsUrl: `${STUDENTS_BASE}`, status: sRes.status, body });
+            throw new Error('Students fetch failed');
+          }
+          const raw = await sRes.json().catch(() => []);
+          studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
         }
-        const raw = await sRes.json().catch(() => []);
-        const rawArray = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
 
         // Normalize and log each student's detected class
-        const normalized = rawArray.map(s => {
+        const normalized = studentsData.map(s => {
           const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '').toString().trim();
           console.log('Student fetched:', { id: s.id || s._id || s.studentId, name: s.name || s.fullName, detectedClass });
           return {
@@ -110,21 +149,20 @@ const TeacherClasses = () => {
           };
         });
 
-        // Filter to only students in the teacher's assigned class (case-insensitive)
-        const filtered = assignedClass
+        // If server returned filtered results (we requested a class) we assume they already match.
+        // However, ensure final filter client-side to handle any mismatch (case-insensitive).
+        const finalList = assignedClass
           ? normalized.filter(st => String(st.class).toLowerCase() === String(assignedClass).toLowerCase())
           : normalized;
 
-        // If there are no filtered students and we had an assignedClass, log that fact
-        if (assignedClass && filtered.length === 0) {
-          console.warn(`No students matched assigned class "${assignedClass}"`);
+        if (assignedClass && finalList.length === 0) {
+          console.warn(`No students matched assigned class "${assignedClass}" after server-side attempt`);
           toast.info(`No students found for ${assignedClass}`);
         }
 
-        setStudents(filtered);
+        setStudents(finalList);
       } catch (err) {
         console.error('Network error fetching students', err);
-        // No local fallback data; clear students and notify teacher
         setStudents([]);
         toast.error('Could not load students from server. Please try again later.');
       }
@@ -405,49 +443,107 @@ const TeacherClasses = () => {
     }
   };
 
+  // Improved image source helper:
+  // Handles:
+  // - data URI strings
+  // - absolute URLs (http(s):// or site-relative '/...')
+  // - raw base64 strings (converted to data URI)
+  // - objects like { data: <base64|string|Array>, type }, { base64: '...' }, { buffer: { data: [...] } } (common from Mongo)
+  // - Uint8Array / ArrayBuffer -> object URL
+  // - falsy -> default avatar
+  function getImageSrc(input, mimeGuess = 'jpeg') {
+    if (input == null) return '/images/default-avatar.png';
+
+    // If input is a string: data:, URL, or raw base64
+    if (typeof input === 'string') {
+      const s = input.trim();
+      if (!s) return '/images/default-avatar.png';
+      if (s.startsWith('data:')) return s;
+      if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
+      // raw base64 (no data: prefix)
+      if (/^[A-Za-z0-9+/=\s]+$/.test(s) && s.length > 50) {
+        return `data:image/${mimeGuess};base64,${s}`;
+      }
+      return s;
+    }
+
+    // If input is an object, try common shapes
+    if (typeof input === 'object') {
+      // Already a URL-like field
+      if (typeof input.src === 'string' && input.src.trim()) return getImageSrc(input.src, mimeGuess);
+      if (typeof input.url === 'string' && input.url.trim()) return getImageSrc(input.url, mimeGuess);
+
+      // { base64: '...' } or { data: '...' }
+      if (typeof input.base64 === 'string' && input.base64.trim()) {
+        const s = input.base64.trim();
+        return s.startsWith('data:') ? s : `data:image/${mimeGuess};base64,${s}`;
+      }
+      if (typeof input.data === 'string' && input.data.trim()) {
+        const s = input.data.trim();
+        return s.startsWith('data:') ? s : `data:${input.type || `image/${mimeGuess}`};base64,${s}`;
+      }
+
+      // Mongo/Mongoose Buffer-like: { data: [num, ...] } or { buffer: { data: [...] } }
+      const arrData = Array.isArray(input.data) ? input.data : (input.buffer && Array.isArray(input.buffer.data) ? input.buffer.data : null);
+      if (arrData) {
+        try {
+          const uint = new Uint8Array(arrData);
+          const blob = new Blob([uint], { type: input.type || `image/${mimeGuess}` });
+          return URL.createObjectURL(blob);
+        } catch (e) {
+          console.warn('Failed converting numeric data to image blob', e);
+        }
+      }
+
+      // If input is already an ArrayBuffer/TypedArray nested inside object
+      if (input instanceof Uint8Array || input instanceof ArrayBuffer) {
+        const blob = input instanceof ArrayBuffer ? new Blob([input], { type: `image/${mimeGuess}` }) : new Blob([input.buffer || input], { type: `image/${mimeGuess}` });
+        return URL.createObjectURL(blob);
+      }
+    }
+
+    // fallback
+    return '/images/default-avatar.png';
+  }
+  
   return (
     <DashboardLayout title="My Classes">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">{assignedClass || 'My Class'}</h1>
-        <p className="mt-1 text-sm text-gray-500">Manage your class, students, and attendance</p>
+      <div className="mb-6 min-w-0">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-gray-900 truncate whitespace-nowrap">{assignedClass || 'My Class'}</h1>
+        <p className="mt-1 text-xs sm:text-sm text-gray-500 truncate whitespace-nowrap max-w-[36rem]">Manage your class, students</p>
       </div>
 
       {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => setActiveTab('students')}
-            className={`${
-              activeTab === 'students' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
-          >
-            Students
-          </button>
-          <button
-            onClick={() => setActiveTab('subjects')}
-            className={`${
-              activeTab === 'subjects' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
-          >
-            Subjects
-          </button>
-          <button
-            onClick={() => setActiveTab('attendance')}
-            className={`${
-              activeTab === 'attendance' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
-          >
-            Attendance
-          </button>
-        </nav>
+        <div className="overflow-x-auto">
+          <nav className="-mb-px flex space-x-8 min-w-0">
+            <button
+              onClick={() => setActiveTab('students')}
+              className={`${
+                activeTab === 'students' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+            >
+              Students
+            </button>
+            <button
+              onClick={() => setActiveTab('subjects')}
+              className={`${
+                activeTab === 'subjects' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+            >
+              Subjects
+            </button>
+            
+          </nav>
+        </div>
       </div>
 
       {activeTab === 'students' && (
         <>
           {/* Search */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
-              <div className="w-full sm:w-96">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 min-w-0">
+              <div className="w-full sm:w-96 min-w-0">
                 <label htmlFor="search" className="sr-only">
                   Search
                 </label>
@@ -472,10 +568,12 @@ const TeacherClasses = () => {
                   />
                 </div>
               </div>
-              <div className="flex space-x-4">
-                <div className="text-sm text-gray-700">
-                  <span className="font-medium">Total Students:</span> {students.length}
+              <div className="flex items-center space-x-4 min-w-0">
+                <div className="text-sm text-gray-700 truncate whitespace-nowrap">
+                  <span className="font-medium">Total Students:</span>{' '}
+                  <span className="inline-block ml-1 font-semibold">{students.length}</span>
                 </div>
+                
               </div>
             </div>
           </div>
@@ -488,17 +586,17 @@ const TeacherClasses = () => {
             <ul className="divide-y divide-gray-200">
               {filteredStudents.map(student => (
                 <li key={student.id} className="px-6 py-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
+                  <div className="flex items-center justify-between min-w-0">
+                    <div className="flex items-center min-w-0">
                       <div className="flex-shrink-0 h-10 w-10">
-                        <img className="h-10 w-10 rounded-full" src={student.picture} alt="" />
+                        <img className="h-10 w-10 rounded-full object-cover" src={getImageSrc(student.picture)} alt="" />
                       </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{student.name}</div>
-                        <div className="text-sm text-gray-500">{student.uid}</div>
+                      <div className="ml-4 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[14rem] sm:max-w-[20rem]">{student.name}</div>
+                        <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[10rem]">{student.uid}</div>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-4">
+                    {/* <div className="flex items-center space-x-4">
                       <div className="text-sm text-gray-500">
                         <span className="font-medium">Attendance Rate:</span>{' '}
                         {Math.round((student.attendance.present / student.attendance.total) * 100)}%
@@ -509,7 +607,7 @@ const TeacherClasses = () => {
                       >
                         View Details
                       </button>
-                    </div>
+                    </div> */}
                   </div>
                 </li>
               ))}
@@ -523,15 +621,23 @@ const TeacherClasses = () => {
 
       {activeTab === 'subjects' && (
         <div className="bg-white shadow rounded-lg overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-lg font-medium text-gray-900">Class Subjects</h2>
-            <button
-              onClick={handleOpenAddSubject}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-            >
-              <PlusIcon className="h-5 w-5 mr-2" />
-              Add Subject
-            </button>
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl font-medium text-gray-900 truncate whitespace-nowrap">Class Subjects</h2>
+            </div>
+            <div className="flex items-center space-x-3 shrink-0">
+              <div className="text-sm text-gray-700 truncate whitespace-nowrap">
+                <span className="font-medium">Total Subjects:</span>{' '}
+                <span className="inline-block ml-1 font-semibold">{classSubjects?.length ?? 0}</span>
+              </div>
+              <button
+                onClick={handleOpenAddSubject}
+                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                Add
+              </button>
+            </div>
           </div>
 
           <ul className="divide-y divide-gray-200">
@@ -543,14 +649,14 @@ const TeacherClasses = () => {
                       <BookOpenIcon className="h-6 w-6 text-blue-500" />
                     </div>
                     <div className="ml-4">
-                      <div className="text-sm font-medium text-gray-900">{subject.name}</div>
-                      {subject.class && <div className="text-sm text-gray-500">{subject.class}{subject.subjectCode ? ` • ${subject.subjectCode}` : ''}</div>}
+                      <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[18rem]">{subject.name}</div>
+                      {subject.class && <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[18rem]">{subject.class}{subject.subjectCode ? ` • ${subject.subjectCode}` : ''}</div>}
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleOpenSubjectModal(subject)}
-                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                     >
                       View Details
                     </button>
@@ -572,17 +678,10 @@ const TeacherClasses = () => {
                 role="dialog"
                 aria-modal="true"
               >
-                <div className="flex items-start space-x-4">
-                  <div className="flex-shrink-0">
-                    <img
-                      src={modalSubject.teacherImg || '/placeholder-avatar.png'}
-                      alt={modalSubject.teachersName || 'Teacher'}
-                      className="h-12 w-12 rounded-full object-cover border"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold">{modalSubject.subjectName || modalSubject.name}</h3>
-                    <p className="text-sm text-gray-500">{modalSubject.teachersName || 'Teacher'}</p>
+                <div className="flex items-start space-x-4 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-semibold truncate whitespace-nowrap">{modalSubject.subjectName || modalSubject.name}</h3>
+                    <p className="text-sm text-gray-500 truncate whitespace-nowrap">{modalSubject.teachersName || 'Teacher'}</p>
                   </div>
                 </div>
                 <div className="mt-4" />
@@ -590,10 +689,10 @@ const TeacherClasses = () => {
                 {/* view mode or edit mode */}
                 {!isEditingSubject ? (
                   <div className="text-sm text-gray-800 space-y-2">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <div className="text-xs text-gray-500">Name</div>
-                        <div className="text-sm font-medium text-gray-900">{modalSubject.subjectName || modalSubject.name}</div>
+                        <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[18rem]">{modalSubject.subjectName || modalSubject.name}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500">Class</div>
@@ -605,7 +704,7 @@ const TeacherClasses = () => {
                       </div>
                       <div>
                         <div className="text-xs text-gray-500">Teacher UID</div>
-                        <div className="text-sm font-medium text-gray-900">{modalSubject.teacherUid || '—'}</div>
+                        <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap">{modalSubject.teacherUid || '—'}</div>
                       </div>
                     </div>
                   </div>
@@ -652,13 +751,13 @@ const TeacherClasses = () => {
                     <>
                       <button
                         onClick={handleCancelEdit}
-                        className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                        className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 text-xs sm:text-sm"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleSaveSubject}
-                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                        className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs sm:text-sm"
                       >
                         Save
                       </button>
@@ -769,7 +868,7 @@ const TeacherClasses = () => {
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <div className="sm:flex sm:items-start">
                   <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900 truncate whitespace-nowrap">
                       Mark Attendance {assignedClass ? `- ${assignedClass}` : ''}
                     </h3>
                     <div className="mt-4">
@@ -836,7 +935,7 @@ const TeacherClasses = () => {
                           <li key={student.id} className="py-3 flex items-center justify-between">
                             <div className="flex items-center">
                               <div className="flex-shrink-0 h-8 w-8">
-                                <img className="h-8 w-8 rounded-full" src={student.picture} alt="" />
+                                <img className="h-8 w-8 rounded-full" src={getImageSrc(student.picture)} alt="" />
                               </div>
                               <div className="ml-3">
                                 <p className="text-sm font-medium text-gray-900">{student.name}</p>
@@ -867,17 +966,17 @@ const TeacherClasses = () => {
                 </div>
               </div>
 
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse space-y-2 sm:space-y-0 sm:space-x-3">
                 <button
                   type="button"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  className="w-full sm:w-auto inline-flex justify-center rounded-md border border-transparent shadow-sm px-3 py-2 bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   onClick={handleSaveAttendance}
                 >
                   Save Attendance
                 </button>
                 <button
                   type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  className="w-full sm:w-auto mt-0 inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-3 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                   onClick={() => setShowMarkAttendanceModal(false)}
                 >
                   Cancel
@@ -902,15 +1001,15 @@ const TeacherClasses = () => {
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <div className="sm:flex sm:items-start">
                   <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full sm:mx-0 sm:h-10 sm:w-10">
-                    <img src={selectedStudent.picture} alt={selectedStudent.name} className="h-10 w-10 rounded-full" />
+                    <img src={getImageSrc(selectedStudent.picture)} alt={selectedStudent.name} className="h-10 w-10 rounded-full" />
                   </div>
                   <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">{selectedStudent.name}'s Details</h3>
+                    <h3 className="text-lg leading-6 font-medium text-gray-900 truncate whitespace-nowrap">{selectedStudent.name}'s Details</h3>
                     <div className="mt-2">
-                      <p className="text-sm text-gray-500">
+                      <p className="text-sm text-gray-500 truncate whitespace-nowrap">
                         Student ID: {selectedStudent.uid} | Class: {selectedStudent.class}
                       </p>
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-gray-500 mt-1 truncate whitespace-nowrap">
                         Overall Attendance: {Math.round((selectedStudent.attendance.present / selectedStudent.attendance.total) * 100)}% ({selectedStudent.attendance.present}/{selectedStudent.attendance.total} days)
                       </p>
                     </div>

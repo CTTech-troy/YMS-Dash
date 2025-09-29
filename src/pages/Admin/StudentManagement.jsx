@@ -32,7 +32,12 @@ const StudentManagement = () => {
       e.target.value = '';
       return;
     }
-    setEditableStudent(prev => ({ ...prev, picture: URL.createObjectURL(file) }));
+    const reader = new FileReader();
+    reader.onload = () => {
+      // reader.result is a data URL (data:<mime>;base64,...)
+      setEditableStudent(prev => ({ ...prev, picture: reader.result }));
+    };
+    reader.readAsDataURL(file);
     e.target.value = '';
   };
 
@@ -107,10 +112,17 @@ const StudentManagement = () => {
     if (typeof raw.gender === 'boolean') genderStr = raw.gender ? 'Male' : 'Female';
     else if (!raw.gender) genderStr = 'Male'; // default if missing
 
+    let picture = '';
+    if (!raw.picture) picture = '';
+    else if (typeof raw.picture === 'string') picture = raw.picture; // legacy plain url or data URL
+    else if (typeof raw.picture === 'object' && raw.picture.mime && raw.picture.data) {
+      picture = `data:${raw.picture.mime};base64,${raw.picture.data}`;
+    }
+
     return {
       ...raw,
       guardians,
-      picture: raw.picture || '',
+      picture,
       uid: raw.uid || raw.id || raw.studentId || '',
       gender: genderStr,
       religion: raw.religion || ''
@@ -180,8 +192,12 @@ const StudentManagement = () => {
       e.target.value = '';
       return;
     }
-    const fileURL = URL.createObjectURL(file);
-    setFormData(prev => ({ ...prev, picture: fileURL }));
+    const reader = new FileReader();
+    reader.onload = () => {
+      // store data URL (will be parsed by backend)
+      setFormData(prev => ({ ...prev, picture: reader.result }));
+    };
+    reader.readAsDataURL(file);
     e.target.value = '';
   };
 

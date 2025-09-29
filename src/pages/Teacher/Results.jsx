@@ -615,10 +615,18 @@ useEffect(() => {
   };
 
   // Handle result deletion
-  const handleDeleteResult = id => {
-    if (window.confirm('Are you sure you want to delete this result?')) {
-      setResults(prev => prev.filter(result => result.id !== id));
+  const handleDeleteResult = async (id) => {
+    if (!id) return;
+    if (!window.confirm('Are you sure you want to delete this result?')) return;
+
+    try {
+      await api.delete(`/api/results/${encodeURIComponent(id)}`);
+      setResults(prev => prev.filter(result => String(result.id) !== String(id)));
       toast.success('Result deleted successfully!');
+    } catch (err) {
+      console.error('Failed to delete result', err);
+      const msg = err?.response?.data?.message || 'Failed to delete result. Check server.';
+      toast.error(msg);
     }
   };
 
@@ -692,31 +700,31 @@ useEffect(() => {
   return (
     <DashboardLayout title="Results Management">
       {/* Header with Add Result button */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Student Results</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
+        <h1 className="text-lg sm:text-2xl font-semibold text-gray-900 truncate whitespace-nowrap">Student Results</h1>
         <button
           type="button"
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          className="inline-flex items-center px-3 py-2 text-sm sm:text-sm rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           onClick={() => setShowAddModal(true)}
         >
-          <PlusIcon className="h-5 w-5 mr-2" />
+          <PlusIcon className="h-4 w-4 mr-2" />
           Add Result
         </button>
       </div>
 
       {/* Results Table */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-4 py-4 border-b border-gray-200 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">picture</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student Uid</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Term</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overall</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comment</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Pic</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Term</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Overall</th>
+                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Comment</th>
+                <th className="px-3 py-2 text-right text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -727,49 +735,51 @@ useEffect(() => {
                 const { percentage, grade } = calculateOverallGrade(result.subjects);
 
                 return (
-                  <tr key={result.id || idx}>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                  <tr key={result.id || idx} className="align-top">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
                         <img
                           src={avatarSrc}
                           alt={studentRecord.name || 'student'}
-                          className="h-10 w-10 rounded-full object-cover"
+                          className="h-8 w-8 rounded-full object-cover"
                         />
                       </div>
                     </td>
 
                     {/* Student name + UID */}
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{studentRecord.name}</div>
-                      <div className="text-xs text-gray-500">{studentRecord.uid}</div>
+                    <td className="px-3 py-3 whitespace-nowrap max-w-[12rem]">
+                      <div className="text-sm text-gray-900 truncate whitespace-nowrap">{studentRecord.name}</div>
+                      <div className="text-xs text-gray-500 truncate whitespace-nowrap">{studentRecord.uid}</div>
                     </td>
 
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{result.session}</div>
-                      <div className="text-sm text-gray-500">{result.term}</div>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 truncate whitespace-nowrap">{result.session}</div>
+                      <div className="text-sm text-gray-500 truncate whitespace-nowrap">{result.term}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{Array.isArray(result.subjects) ? result.subjects.length : 0} subjects</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {Array.isArray(result.subjects) ? result.subjects.length : 0} subject{(Array.isArray(result.subjects) && result.subjects.length !== 1) ? 's' : ''}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{percentage}%</div>
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${grade === 'A+' || grade === 'A' ? 'bg-green-100 text-green-800' : grade === 'B' ? 'bg-blue-100 text-blue-800' : grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>Grade {grade}</span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${result.commentStatus ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                         {result.commentStatus ? 'Added' : 'Not Added'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button onClick={() => handleViewResult(result)} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View result">
-                        <EyeIcon className="h-5 w-5" />
+                    <td className="px-3 py-3 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      <button onClick={() => handleViewResult(result)} className="text-blue-600 hover:text-blue-900 p-1" aria-label="View result">
+                        <EyeIcon className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 mr-3" aria-label="Add comment">
-                        <MessageCircleIcon className="h-5 w-5" />
+                      <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 p-1" aria-label="Add comment">
+                        <MessageCircleIcon className="h-4 w-4" />
                       </button>
-                      <button className="text-indigo-600 hover:text-indigo-900 mr-3" aria-label="Edit result">
-                        <PencilIcon className="h-5 w-5" />
+                      <button className="text-indigo-600 hover:text-indigo-900 p-1" aria-label="Edit result">
+                        <PencilIcon className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleDeleteResult(result.id)} className="text-red-600 hover:text-red-900" aria-label="Delete result">
-                        <TrashIcon className="h-5 w-5" />
+                      <button onClick={() => handleDeleteResult(result.id)} className="text-red-600 hover:text-red-900 p-1" aria-label="Delete result">
+                        <TrashIcon className="h-4 w-4" />
                       </button>
                     </td>
                   </tr>
@@ -777,7 +787,7 @@ useEffect(() => {
               })}
               {results.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="px-6 py-4 text-center text-sm text-gray-500">No results found. Click "Add Result" to add a new result.</td>
+                  <td colSpan="7" className="px-3 py-4 text-center text-sm text-gray-500">No results found. Click "Add Result" to add a new result.</td>
                 </tr>
               )}
             </tbody>
@@ -786,13 +796,13 @@ useEffect(() => {
       </div>
 
       {/* Add Result Modal */}
-      <Modal open={showAddModal} title="Add New Result" onClose={() => setShowAddModal(false)}>
+      <Modal open={showAddModal} title="Add New Result" onClose={() => setShowAddModal(false)} className="sm:max-w-4xl">
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-3">
               <div>
                 <label htmlFor="studentId" className="block text-sm font-medium text-gray-700">Student</label>
-                <select id="studentId" name="studentId" required value={formData.studentId} onChange={handleStudentChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                <select id="studentId" name="studentId" required value={formData.studentId} onChange={handleStudentChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
                   <option value="">Select a student</option>
                   { (isTeacher ? classStudents : allStudents).map(student => (
                       <option key={student.id} value={String(student.id)}>{student.name} ({student.uid || student.id})</option>
@@ -802,7 +812,7 @@ useEffect(() => {
               </div>
               <div>
                 <label htmlFor="session" className="block text-sm font-medium text-gray-700">Session</label>
-                <select id="session" name="session" required value={formData.session} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                <select id="session" name="session" required value={formData.session} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
                   <option value="">Select session</option>
                   <option value="2025/2026">2025/2026</option>
                   <option value="2026/2027">2026/2027</option>
@@ -811,7 +821,7 @@ useEffect(() => {
               </div>
               <div>
                 <label htmlFor="term" className="block text-sm font-medium text-gray-700">Term</label>
-                <select id="term" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                <select id="term" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
                   <option value="">Select term</option>
                   <option value="First Term">First Term</option>
                   <option value="Second Term">Second Term</option>
@@ -827,11 +837,11 @@ useEffect(() => {
                   <h4 className="text-sm font-medium text-gray-900 mb-4">
                     Select Subjects {selectedStudent ? `for ${selectedStudent.name}` : '(choose student to personalise selection)'}
                   </h4>
-                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
                      {subjects.map(subject => (
                        <div key={subject.id} className="flex items-center">
                          <input id={`subject-${subject.id}`} type="checkbox" checked={formData.subjects.some(s => String(s.id) === String(subject.id))} onChange={() => handleSubjectToggle(subject.id)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" />
-                         <label htmlFor={`subject-${subject.id}`} className="ml-2 block text-sm text-gray-900">{subject.name}</label>
+                         <label htmlFor={`subject-${subject.id}`} className="ml-2 block text-sm text-gray-900 truncate whitespace-nowrap">{subject.name}</label>
                        </div>
                      ))}
                    </div>
@@ -844,10 +854,10 @@ useEffect(() => {
                           <thead className="bg-gray-50">
                             <tr>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">1st Test (10)</th>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">2nd Test (10)</th>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd Test (10)</th>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam (70)</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">1st</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">2nd</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
@@ -856,18 +866,18 @@ useEffect(() => {
                           <tbody className="bg-white divide-y divide-gray-200">
                             {formData.subjects.map(subject => (
                               <tr key={subject.id}>
-                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{subject.name}</td>
+                                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 truncate max-w-[12rem]">{subject.name}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" step="1" value={subject.firstTest} onChange={e => handleSubjectScoreChange(subject.id, 'firstTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number"  value={subject.firstTest} onChange={e => handleSubjectScoreChange(subject.id, 'firstTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" step="1" value={subject.secondTest} onChange={e => handleSubjectScoreChange(subject.id, 'secondTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number"  value={subject.secondTest} onChange={e => handleSubjectScoreChange(subject.id, 'secondTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" step="1" value={subject.thirdTest} onChange={e => handleSubjectScoreChange(subject.id, 'thirdTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number"  value={subject.thirdTest} onChange={e => handleSubjectScoreChange(subject.id, 'thirdTest', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap">
-                                  <input type="number" step="1" value={subject.exam} onChange={e => handleSubjectScoreChange(subject.id, 'exam', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm sm:text-sm border-gray-300 rounded-md" />
+                                  <input type="number"  value={subject.exam} onChange={e => handleSubjectScoreChange(subject.id, 'exam', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{subject.total}</td>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td>
@@ -884,15 +894,15 @@ useEffect(() => {
 
                   <div className="mt-6">
                     <label htmlFor="teacherComment" className="block text-sm font-medium text-gray-700">Teacher's Comment</label>
-                    <textarea id="teacherComment" name="teacherComment" rows={3} value={formData.teacherComment} onChange={handleInputChange} className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md" placeholder="Enter your comment about the student's performance" />
+                    <textarea id="teacherComment" name="teacherComment" rows={3} value={formData.teacherComment} onChange={handleInputChange} className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm text-sm border-gray-300 rounded-md" placeholder="Enter your comment about the student's performance" />
                   </div>
                 </div>
               </>
             )}
 
-            <div className="flex justify-end space-x-2 pt-4 border-t border-gray-100">
-              <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 rounded border bg-white">Cancel</button>
-              <button type="submit" className="px-4 py-2 rounded bg-blue-600 text-white">Add Result</button>
+            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t border-gray-100">
+              <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-2 rounded border bg-white text-sm">Cancel</button>
+              <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Add Result</button>
             </div>
           </div>
         </form>
@@ -902,18 +912,18 @@ useEffect(() => {
       <Modal open={showViewModal} title="Result Card" onClose={() => setShowViewModal(false)} className="sm:max-w-4xl">
         {selectedResult && (
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
               <div>
                 <h4 className="text-sm font-medium text-gray-500">Student Name</h4>
-                <p className="text-sm text-gray-900">{findStudentById(selectedResult.studentId)?.name}</p>
+                <p className="text-sm text-gray-900 truncate whitespace-nowrap">{findStudentById(selectedResult.studentId)?.name}</p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-gray-500">Student ID</h4>
-                <p className="text-sm text-gray-900">{findStudentById(selectedResult.studentId)?.uid}</p>
+                <p className="text-sm text-gray-900 truncate whitespace-nowrap">{findStudentById(selectedResult.studentId)?.uid}</p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-gray-500">Class</h4>
-                <p className="text-sm text-gray-900">{findStudentById(selectedResult.studentId)?.class || 'Class 4B'}</p>
+                <p className="text-sm text-gray-900 truncate whitespace-nowrap">{findStudentById(selectedResult.studentId)?.class || '—'}</p>
               </div>
             </div>
 
@@ -937,20 +947,18 @@ useEffect(() => {
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd Test</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                      {/* <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th> */}
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {getSelectedResultDisplaySubjects(selectedResult).map((subject, index) => (
                       <tr key={index}>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{subject.name}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900 truncate max-w-[12rem]">{subject.name}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{subject.firstTest}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{subject.secondTest}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{subject.thirdTest}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{subject.exam}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{subject.total}</td>
-                        {/* <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td> */}
                         <td className="px-3 py-2 whitespace-nowrap">
                           <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${subject.grade === 'A+' || subject.grade === 'A' ? 'bg-green-100 text-green-800' : subject.grade === 'B' ? 'bg-blue-100 text-blue-800' : subject.grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>{subject.grade}</span>
                         </td>
@@ -988,23 +996,23 @@ useEffect(() => {
                   <h3 className="text-lg leading-6 font-medium text-gray-900">Add Teacher Comment</h3>
                 </div>
                 <div className="mt-2">
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-gray-500 truncate whitespace-nowrap">
                     Student: {findStudentById(selectedResult.studentId)?.name} | {selectedResult.session} - {selectedResult.term}
                   </p>
                 </div>
                 <div className="mt-4">
                   <label htmlFor="teacherComment" className="block text-sm font-medium text-gray-700">Comment</label>
-                  <textarea id="teacherComment" rows={4} value={comment} onChange={e => setComment(e.target.value)} className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md" placeholder="Enter your comment about the student's performance" />
+                  <textarea id="teacherComment" rows={4} value={comment} onChange={e => setComment(e.target.value)} className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm text-sm border-gray-300 rounded-md" placeholder="Enter your comment about the student's performance" />
                 </div>
                 <div className="mt-4">
-                  <div className="grid grid-cols-1 gap-y-2 gap-x-3 sm:grid-cols-3">
-                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500" onClick={() => setComment('Excellent work! Keep up the high standards.')}>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500" onClick={() => setComment('Excellent work! Keep up the high standards.')}>
                       Positive
                     </button>
-                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500" onClick={() => setComment('Needs to improve in some subjects. Work harder next term.')}>
+                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500" onClick={() => setComment('Needs to improve in some subjects. Work harder next term.')}>
                       Warning
                     </button>
-                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" onClick={() => setComment('Good progress. Keep it up!')}>
+                    <button type="button" className="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" onClick={() => setComment('Good progress. Keep it up!')}>
                       General
                     </button>
                   </div>
@@ -1012,11 +1020,11 @@ useEffect(() => {
               </div>
             </div>
           </div>
-          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-            <button type="button" className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm" onClick={handleSaveComment}>
+          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse space-y-2 sm:space-y-0 sm:space-x-3">
+            <button type="button" className="w-full sm:w-auto inline-flex justify-center rounded-md border border-transparent shadow-sm px-3 py-2 bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3" onClick={handleSaveComment}>
               Save Comment
             </button>
-            <button type="button" className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm" onClick={() => setShowCommentModal(false)}>
+            <button type="button" className="w-full sm:w-auto mt-0 inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-3 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" onClick={() => setShowCommentModal(false)}>
               Cancel
             </button>
           </div>

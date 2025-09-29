@@ -9,46 +9,125 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 // Sample fallback data
 const fallbackAssignedClass = {
   name: 'Class Loading',
-  students: 28
+  students: 0
 };
-const recentActivities = [{
-  id: 1,
-  type: 'Result',
-  description: 'Uploaded Term 1 results for Class 3A',
-  time: '2 hours ago'
-}, {
-  id: 2,
-  type: 'Attendance',
-  description: 'Marked attendance for Class 3A',
-  time: '1 day ago'
-}, {
-  id: 3,
-  type: 'Active',
-  description: 'New student Alex Johnson added to Class 3A',
-  time: '3 days ago'
-}];
-const upcomingEvents = [{
-  id: 1,
-  title: 'Math Quiz',
-  class: 'Class 3A',
-  date: '2023-07-15'
-}, {
-  id: 2,
-  title: 'Science Project Due',
-  class: 'Class 3A',
-  date: '2023-07-20'
-}, {
-  id: 3,
-  title: 'Parent-Teacher Meeting',
-  class: 'All Classes',
-  date: '2023-07-25'
-}];
+const recentActivities = [{ id: 1, type: 'Result', description: 'Uploaded Term 1 results for Class 3A', time: '2 hours ago' }, { id: 2, type: 'Attendance', description: 'Marked attendance for Class 3A', time: '1 day ago' }, { id: 3, type: 'Active', description: 'New student Alex Johnson added to Class 3A', time: '3 days ago' }];
+const upcomingEvents = [{ id: 1, title: 'Math Quiz', class: 'Class 3A', date: '2023-07-15' }, { id: 2, title: 'Science Project Due', class: 'Class 3A', date: '2023-07-20' }, { id: 3, title: 'Parent-Teacher Meeting', class: 'All Classes', date: '2023-07-25' }];
 
 const TeacherDashboard = () => {
   const { currentUser, userRole } = useAuth();
   const navigate = useNavigate();
   const [teacherProfile, setTeacherProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+
+  // counts fetched/derived after profile load
+  const [assignedStudentsCount, setAssignedStudentsCount] = useState(undefined);
+  const [teacherSubjectCount, setTeacherSubjectCount] = useState(undefined);
+
+  // helper to compare class names/ids (case-insensitive)
+  const classMatches = (studentClass, assignedClass) => {
+    if (!studentClass || !assignedClass) return false;
+    return String(studentClass).trim().toLowerCase() === String(assignedClass).trim().toLowerCase();
+  };
+
+  // fetch counts: students in assigned class and subjects added by this teacher
+  useEffect(() => {
+    if (!teacherProfile) {
+      setAssignedStudentsCount(undefined);
+      setTeacherSubjectCount(undefined);
+      return;
+    }
+
+    const fetchCounts = async () => {
+      // Students count: normalize by filtering students whose class matches teacherProfile.assignedClass
+      try {
+        // 1) Use explicit profile count if available
+        if (typeof teacherProfile.studentsCount === 'number') {
+          setAssignedStudentsCount(teacherProfile.studentsCount);
+        } else if (Array.isArray(teacherProfile.raw?.students)) {
+          // 2) If profile includes students array, filter it strictly by class match
+          const filtered = teacherProfile.raw.students.filter(s =>
+            classMatches(s.class || s.className || s.assignedClass || s.klass || s.grade, teacherProfile.assignedClass)
+          );
+          setAssignedStudentsCount(filtered.length);
+        } else if (teacherProfile.assignedClass) {
+          // 3) Query students endpoint (prefer filtered endpoint), then always apply classMatches locally
+          const q = encodeURIComponent(teacherProfile.assignedClass);
+          try {
+            const res = await fetch(`${API_BASE}/api/students?class=${q}`);
+            let arr = [];
+            if (res.ok) {
+              arr = await res.json();
+            } else {
+              const res2 = await fetch(`${API_BASE}/api/students`);
+              if (res2.ok) arr = await res2.json();
+            }
+            const filtered = Array.isArray(arr)
+              ? arr.filter(s =>
+                  classMatches(s.class || s.className || s.assignedClass || s.klass || s.grade, teacherProfile.assignedClass)
+                )
+              : [];
+            setAssignedStudentsCount(filtered.length);
+          } catch (e) {
+            console.warn('Student fetch failed, skipping remote count', e);
+          }
+        } else {
+          setAssignedStudentsCount(undefined);
+        }
+      } catch (e) {
+        console.warn('Failed to compute assigned students count', e);
+      }
+
+      // Subjects count: prefer profile value then query subjects by teacher id/uid and fall back to parsing subject string
+      try {
+        if (typeof teacherProfile.subjectsCount === 'number') {
+          setTeacherSubjectCount(teacherProfile.subjectsCount);
+        } else if (Array.isArray(teacherProfile.raw?.subjects)) {
+          setTeacherSubjectCount(teacherProfile.raw.subjects.length);
+        } else {
+          const teacherId = teacherProfile.id ?? teacherProfile.uid ?? teacherProfile.uid;
+          if (teacherId) {
+            const tryUrls = [
+              `${API_BASE}/api/subjects?teacherId=${encodeURIComponent(teacherId)}`,
+              `${API_BASE}/api/subjects?teacher=${encodeURIComponent(teacherId)}`
+            ];
+            let counted = undefined;
+            for (const url of tryUrls) {
+              try {
+                const res = await fetch(url);
+                if (res.ok) {
+                  const list = await res.json();
+                  counted = Array.isArray(list) ? list.length : (list?.length ?? undefined);
+                  break;
+                }
+              } catch {
+                // ignore and try next
+              }
+            }
+            if (typeof counted === 'number') {
+              setTeacherSubjectCount(counted);
+            } else if (typeof teacherProfile.subject === 'string' && teacherProfile.subject.trim()) {
+              const n = teacherProfile.subject.split(',').map(s => s.trim()).filter(Boolean).length;
+              setTeacherSubjectCount(n);
+            } else {
+              setTeacherSubjectCount(0);
+            }
+          } else {
+            if (typeof teacherProfile.subject === 'string' && teacherProfile.subject.trim()) {
+              const n = teacherProfile.subject.split(',').map(s => s.trim()).filter(Boolean).length;
+              setTeacherSubjectCount(n);
+            } else {
+              setTeacherSubjectCount(0);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to compute teacher subject count', e);
+      }
+    };
+
+    fetchCounts();
+  }, [teacherProfile]);
 
   useEffect(() => {
     const normalize = (data) => {
@@ -59,7 +138,26 @@ const TeacherDashboard = () => {
             : `data:image/jpeg;base64,${rawPicture}`)
         : '/images/default-avatar.png';
 
-      const subjects = Array.isArray(data.subjects) ? data.subjects.join(', ') : (data.subject ?? '');
+      // determine subjects as array and joined string, and subject count
+      const subjectsArray = Array.isArray(data.subjects)
+        ? data.subjects
+        : (typeof data.subjects === 'string' && data.subjects.trim())
+          ? data.subjects.split(',').map(s => s.trim()).filter(Boolean)
+          : (typeof data.subject === 'string' && data.subject.trim())
+            ? data.subject.split(',').map(s => s.trim()).filter(Boolean)
+            : [];
+      const subjects = subjectsArray.join(', ');
+
+      // determine students count: direct fields, nested assignedClass object, or students array filtered by class
+      const studentsCount = data.studentsCount
+        ?? data.classStudentCount
+        ?? (Array.isArray(data.students)
+            ? data.students.filter(s =>
+                classMatches(s.class || s.className || s.assignedClass || s.klass || s.grade,
+                  (typeof data.assignedClass === 'string' ? data.assignedClass : (data.assignedClass?.name || '')))
+              ).length
+            : (typeof data.assignedClass === 'object' ? (data.assignedClass.students?.length ?? data.assignedClass.studentCount) : undefined)
+        );
 
       return {
         id: data.id ?? data._id ?? null,
@@ -68,8 +166,9 @@ const TeacherDashboard = () => {
         email: data.email ?? '',
         phone: data.phone ?? '',
         subject: subjects,
-        assignedClass: data.assignedClass ?? data.assignedClassName ?? '',
-        studentsCount: data.studentsCount ?? data.classStudentCount ?? undefined,
+        subjectsCount: subjectsArray.length,
+        assignedClass: (typeof data.assignedClass === 'string' ? data.assignedClass : (data.assignedClassName ?? (data.assignedClass?.name ?? ''))),
+        studentsCount: studentsCount,
         pictureSrc,
         mustChangePassword: !!data.mustChangePassword,
         raw: data
@@ -117,7 +216,16 @@ const TeacherDashboard = () => {
 
   // derive stats using teacherProfile when available
   const assignedClassName = teacherProfile?.assignedClass || fallbackAssignedClass.name;
-  const totalStudents = teacherProfile?.studentsCount ?? fallbackAssignedClass.students;
+  // total students prefers fetched assignedStudentsCount, then profile count, then fallback
+  const totalStudents = assignedStudentsCount ?? teacherProfile?.studentsCount ?? fallbackAssignedClass.students;
+
+  // subject count prefers fetched teacherSubjectCount then profile subjectsCount then fallback
+  const subjectCount = teacherSubjectCount ?? teacherProfile?.subjectsCount
+    ?? (typeof teacherProfile?.subject === 'string' && teacherProfile.subject.trim()
+        ? teacherProfile.subject.split(',').map(s => s.trim()).filter(Boolean).length
+        : 0);
+
+  const upcomingEventsCount = Array.isArray(upcomingEvents) ? upcomingEvents.length : 0;
 
   const stats = [{
     name: 'Assigned Class',
@@ -130,13 +238,13 @@ const TeacherDashboard = () => {
     icon: <UsersIcon className="h-6 w-6" />,
     color: 'bg-green-500'
   }, {
-    name: 'Upcoming Events',
-    value: upcomingEvents.length,
+    name: 'Total subjects',
+    value: subjectCount,
     icon: <ClipboardListIcon className="h-6 w-6" />,
     color: 'bg-orange-500'
   }, {
-    name: 'Active Notifications',
-    value: 5,
+    name: 'Upcoming Events',
+    value: upcomingEventsCount,
     icon: <BellIcon className="h-6 w-6" />,
     color: 'bg-purple-500'
   }];
@@ -186,9 +294,6 @@ const TeacherDashboard = () => {
             <p className="text-sm text-gray-500">
               {teacherProfile?.subject ? `Subject: ${teacherProfile.subject}` : ''}
             </p>
-            {/* <p className="text-sm text-gray-500">
-              {teacherProfile?.assignedClass ? `Assigned: ${teacherProfile.assignedClass}` : ''}
-            </p> */}
           </div>
         </div>
       </div>
@@ -291,7 +396,7 @@ const TeacherDashboard = () => {
                 <UsersIcon className="h-6 w-6 text-green-600" />
               </div>
               <div className="ml-4">
-                <h3 className="text-sm font-medium text-gray-900">Mark Attendance</h3>
+                <h3 className="text-sm font-medium text-gray-900">Students</h3>
               </div>
             </div>
           </button>

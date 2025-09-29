@@ -22,6 +22,7 @@ const DashboardLayout = ({
     logout();
     navigate('/login');
   };
+
 function avatarSrc(input) {
   // normalize when a user object is passed
   if (!input) return "/images/default-avatar.png";
@@ -49,32 +50,6 @@ function avatarSrc(input) {
   // fallback: return original string to avoid creating an invalid data: URL
   return s;
 }
-
-  // helper to build avatar src with fallbacks (accepts data-url or base64 string)
-  // const avatarSrc = (user) => {
-  //   if (!user) return '/images/default-avatar.png';
-  //   const a = user.avatar ?? user.picture ?? user.profilePicture ?? user.profileImage ?? '';
-  //   if (!a) return '/images/default-avatar.png';
-
-  //   if (typeof a === 'string') {
-  //     const s = a.trim();
-
-  //     // Already a data URL
-  //     if (s.startsWith('data:')) return s;
-
-  //     // Full URL or absolute path
-  //     if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
-
-  //     // Likely base64 string (very rough check: allowed chars and length)
-  //     const base64Candidate = s.replace(/\s+/g, '');
-  //     if (/^[A-Za-z0-9+/=]+$/.test(base64Candidate) && base64Candidate.length > 50) {
-  //       return `data:image/jpeg;base64,${base64Candidate}`;
-  //     }
-  //   }
-
-  //   // fallback
-  //   return '/images/default-avatar.png';
-  // };
 
   // Define navigation items based on user role
   const getNavItems = () => {
@@ -122,10 +97,6 @@ function avatarSrc(input) {
         path: '/teacher/results',
         icon: <ClipboardListIcon className="w-5 h-5" />
       }, {
-        name: 'Attendance',
-        path: '/teacher/attendance',
-        icon: <CalendarIcon className="w-5 h-5" />
-      }, {
         name: 'Profile',
         path: '/teacher/profile',
         icon: <UserIcon className="w-5 h-5" />
@@ -156,13 +127,13 @@ function avatarSrc(input) {
             </button>
           </div>
           <div className="flex-shrink-0 flex items-center px-4">
-            <h1 className="text-xl font-bold text-blue-600">School Management</h1>
+            <h1 className="text-lg sm:text-base font-bold text-blue-600 truncate whitespace-nowrap">Yetland Management</h1>
           </div>
           <div className="mt-5 flex-1 h-0 overflow-y-auto">
             <nav className="px-2 space-y-1">
-              {navItems.map(item => <Link key={item.name} to={item.path} className={`${location.pathname === item.path ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'} group flex items-center px-2 py-2 text-base font-medium rounded-md`}>
-                  {item.icon}
-                  <span className="ml-3">{item.name}</span>
+              {navItems.map(item => <Link key={item.name} to={item.path} className={`${location.pathname === item.path ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'} group flex items-center px-2 py-2 text-sm rounded-md truncate whitespace-nowrap`}>
+                  <div className="flex-shrink-0">{item.icon}</div>
+                  <span className="ml-3 text-sm truncate whitespace-nowrap">{item.name}</span>
                 </Link>)}
             </nav>
           </div>
@@ -174,13 +145,13 @@ function avatarSrc(input) {
           <div className="flex flex-col w-64">
             <div className="flex flex-col flex-grow border-r border-gray-200 pt-5 pb-4 bg-white overflow-y-auto">
               <div className="flex items-center flex-shrink-0 px-4">
-                <h1 className="text-xl font-bold text-blue-600">School Management</h1>
+                <h1 className="text-lg sm:text-base font-bold text-blue-600 truncate whitespace-nowrap">Yetland Management</h1>
               </div>
               <div className="mt-8 flex-grow flex flex-col">
                 <nav className="flex-1 px-2 bg-white space-y-1">
-                  {navItems.map(item => <Link key={item.name} to={item.path} className={`${location.pathname === item.path ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'} group flex items-center px-2 py-2 text-sm font-medium rounded-md`}>
-                      {item.icon}
-                      <span className="ml-3">{item.name}</span>
+                  {navItems.map(item => <Link key={item.name} to={item.path} className={`${location.pathname === item.path ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'} group flex items-center px-2 py-2 text-sm rounded-md truncate whitespace-nowrap`}>
+                      <div className="flex-shrink-0">{item.icon}</div>
+                      <span className="ml-3 text-sm truncate whitespace-nowrap">{item.name}</span>
                     </Link>)}
                 </nav>
               </div>
@@ -197,24 +168,17 @@ function avatarSrc(input) {
             </button>}
 
           <div className="flex-1 px-4 flex justify-between items-center">
-            <div className="flex-1 flex items-center">
-              <h1 className="text-xl font-semibold text-gray-800 truncate">{title}</h1>
+            <div className="flex-1 flex items-center min-w-0">
+              <h1 className="text-sm sm:text-base md:text-lg font-semibold text-gray-800 truncate whitespace-nowrap">{title}</h1>
             </div>
 
-            <div className="ml-4 flex items-center md:ml-6">
-              {/* Notification button */}
-              {userRole !== 'student' && <button className="p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                  <span className="sr-only">View notifications</span>
-                  <BellIcon className="h-6 w-6" />
-                </button>}
-
+            <div className="ml-4 flex items-center md:ml-6">         
               {/* Profile dropdown */}
               <div className="ml-3 relative">
                 <div>
                   <button type="button" className="max-w-xs flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" id="user-menu" aria-expanded="false" aria-haspopup="true" onClick={() => setShowProfileMenu(!showProfileMenu)}>
                     <span className="sr-only">Open user menu</span>
-                    <img className="h-8 w-8 rounded-full object-cover" src={avatarSrc(displayUser?.pictureSrc)} alt={displayUser?.name || 'User'} />
-                    <span className="ml-2 text-gray-700">{displayUser?.name || displayUser?.fullName || 'User'}</span>
+                    <span className="ml-2 text-sm text-gray-700 truncate whitespace-nowrap max-w-[10rem]">{displayUser?.name || displayUser?.fullName || 'User'}</span>
                     <ChevronDownIcon className="ml-1 h-5 w-5 text-gray-400" />
                   </button>
                 </div>
@@ -223,16 +187,10 @@ function avatarSrc(input) {
                     {/* show user name + email */}
                     <div className="px-4 py-2 border-b border-gray-100">
                       <div className="flex items-center space-x-3">
-<img
-  className="h-10 w-10 rounded-full object-cover"
-  src={avatarSrc(displayUser?.pictureSrc)}
-  alt={displayUser?.name || displayUser?.fullName || displayUser?.email || "User"}
-/>
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{displayUser?.name || 'User'}</div>
-<div className="text-xs text-gray-500">
-  {displayUser?.uid ? `Staff ID: ${displayUser.uid}` : ''}
-</div>
+                      
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-900 truncate">{displayUser?.name || 'User'}</div>
+                          <div className="text-xs text-gray-500 truncate">{displayUser?.uid ? `Staff ID: ${displayUser.uid}` : ''}</div>
                         </div>
                       </div>
                     </div>
