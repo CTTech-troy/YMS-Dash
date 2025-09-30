@@ -65,6 +65,8 @@ const initialResults = []; // Start with an empty array or provide default resul
 
 const TeacherResults = () => {
   const [results, setResults] = useState(initialResults);
+  const [showEditModal, setShowEditModal] = useState(false); // new: edit modal flag
+  const [editingId, setEditingId] = useState(null); // id of result being edited
   const { currentUser } = useAuth();
   // Reintroduced state to hold class students (filtered from Student API)
   const [classStudents, setClassStudents] = useState([]);
@@ -87,7 +89,93 @@ const TeacherResults = () => {
     teacherComment: '',
     published:''
   });
+  // helper: reset form to empty for create
+  const resetForm = () => {
+    setFormData({
+      studentId: '',
+      studentuid: '',
+      session: '',
+      term: '',
+      subjects: [],
+      teacherComment: '',
+      published: ''
+    });
+    setSelectedStudent(null);
+    setEditingId(null);
+  };
+  // Open edit modal and prefill form with selected result
+  const handleEditClick = async (result) => {
+    if (!result) return;
+    // map backend result -> formData shape (best-effort)
+    const studentId = result.studentId || result.studentIdRef || result.student || result.studentUid || '';
+    const studentuid = result.studentUid || result.studentuid || result.student_uid || '';
 
+    const subjectsPrefill = Array.isArray(result.subjects) ? result.subjects.map(s => ({
+      id: s.id || s._id || s.subjectId || (s.name ? s.name.toLowerCase().replace(/\s+/g,'-') : Math.random().toString(36).slice(2,8)),
+      name: s.name || s.title || s.subjectName || '',
+      firstTest: s.firstTest ?? s.first ?? 0,
+      secondTest: s.secondTest ?? s.second ?? 0,
+      thirdTest: s.thirdTest ?? s.third ?? 0,
+      exam: s.exam ?? s.examScore ?? 0,
+      total: s.total ?? 0,
+      percentage: s.percentage ?? 0,
+      grade: s.grade ?? ''
+    })) : [];
+
+    setFormData({
+      studentId: String(studentId),
+      studentuid: String(studentuid),
+      session: result.session || '',
+      term: result.term || '',
+      subjects: subjectsPrefill,
+      teacherComment: result.teacherComment || '',
+      published: result.published || ''
+    });
+
+    // try to resolve selectedStudent for nicer UI
+    const resolvedStudent = findStudentById(studentId) || findStudentById(studentuid) || null;
+    if (resolvedStudent) setSelectedStudent(resolvedStudent);
+
+    setEditingId(String(result.id || result._id || ''));
+    setShowEditModal(true);
+  };
+  // Save edited result
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingId) {
+      toast.error('Missing result id for edit.');
+      return;
+    }
+    if (!formData.studentId) {
+      toast.error('Please select a student');
+      return;
+    }
+    try {
+      const payload = {
+        studentId: formData.studentId,
+        studentuid: formData.studentuid || formData.studentId,
+        studentUid: formData.studentuid || formData.studentId,
+        session: formData.session,
+        term: formData.term,
+        subjects: formData.subjects,
+        teacherComment: formData.teacherComment || ''
+      };
+      const res = await api.put(`/api/results/${encodeURIComponent(editingId)}`, payload);
+      const updated = res?.data || { id: editingId, ...payload };
+      // Normalize id key
+      const updatedNormalized = { ...updated, id: updated.id || updated._id || editingId };
+      setResults(prev => prev.map(r => (String(r.id || r._id) === String(editingId) ? { ...r, ...updatedNormalized } : r)));
+      toast.success('Result updated.');
+      setShowEditModal(false);
+      resetForm();
+      // refresh list to ensure consistency
+      await loadResults();
+    } catch (err) {
+      console.error('Failed to update result', err, err?.response?.data);
+      const msg = err?.response?.data?.message || 'Failed to update result.';
+      toast.error(msg);
+    }
+  };
   // role helpers
   const isTeacher = currentUser && (currentUser.role === 'teacher' || currentUser.userType === 'teacher');
   const isStudent = currentUser && (currentUser.role === 'student' || currentUser.userType === 'student');
@@ -310,11 +398,29 @@ useEffect(() => {
   // Normalizes student picture to a valid image src or returns a default avatar
   const normalizeStudentPicture = (pic) => {
     if (!pic || typeof pic !== 'string') return '/images/default-avatar.png';
-    // If base64 image
-    if (pic.startsWith('data:image')) return pic;
-    // If URL or relative path
-    if (pic.startsWith('http') || pic.startsWith('/')) return pic;
-    // Otherwise, fallback to default avatar
+    const trimmed = pic.trim();
+
+    // Already a data URI => use as-is
+    if (trimmed.startsWith('data:image')) return trimmed;
+
+    // If backend returned "image/jpeg;base64,XXXX..." (missing data: prefix) -> prefix it
+    if (/^[a-zA-Z\-]+\/[a-zA-Z0-9\-\+]+;base64,/.test(trimmed)) {
+      return `data:${trimmed}`;
+    }
+
+    // Raw base64 string (no mime) - detect likely image by common JPEG/PNG signatures and build data URI
+    const base64Only = trimmed.replace(/\s+/g, '');
+    if (/^[A-Za-z0-9+/=]+$/.test(base64Only) && base64Only.length > 100) {
+      // JPEG files often start with /9j/ in base64, PNG with iVBOR
+      const prefix = base64Only.slice(0, 8);
+      const mime = prefix.startsWith('/9j') ? 'image/jpeg' : (prefix.startsWith('iVBOR') ? 'image/png' : 'image/jpeg');
+      return `data:${mime};base64,${base64Only}`;
+    }
+
+    // If it's a full URL or relative path use it
+    if (trimmed.startsWith('http') || trimmed.startsWith('/')) return trimmed;
+
+    // fallback
     return '/images/default-avatar.png';
   };
 
@@ -739,7 +845,7 @@ useEffect(() => {
                     <td className="px-3 py-3 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
                         <img
-                          src={avatarSrc}
+                          src={avatarSrc || '/images/default-avatar.png'}
                           alt={studentRecord.name || 'student'}
                           className="h-8 w-8 rounded-full object-cover"
                         />
@@ -775,7 +881,7 @@ useEffect(() => {
                       <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 p-1" aria-label="Add comment">
                         <MessageCircleIcon className="h-4 w-4" />
                       </button>
-                      <button className="text-indigo-600 hover:text-indigo-900 p-1" aria-label="Edit result">
+                      <button onClick={() => handleEditClick(result)} className="text-indigo-600 hover:text-indigo-900 p-1" aria-label="Edit result">
                         <PencilIcon className="h-4 w-4" />
                       </button>
                       <button onClick={() => handleDeleteResult(result.id)} className="text-red-600 hover:text-red-900 p-1" aria-label="Delete result">
@@ -903,6 +1009,99 @@ useEffect(() => {
             <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-2 rounded border bg-white text-sm">Cancel</button>
               <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Add Result</button>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Result Modal */}
+      <Modal open={showEditModal} title="Edit Result" onClose={() => { setShowEditModal(false); resetForm(); }} className="sm:max-w-4xl">
+        <form onSubmit={handleEditSubmit}>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-3">
+              <div>
+                <label htmlFor="studentId_edit" className="block text-sm font-medium text-gray-700">Student</label>
+                <select id="studentId_edit" name="studentId" required value={formData.studentId} onChange={handleStudentChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
+                  <option value="">Select a student</option>
+                  { (isTeacher ? classStudents : allStudents).map(student => (
+                      <option key={student.id} value={String(student.id)}>{student.name} ({student.uid || student.id})</option>
+                    ))
+                  }
+                </select>
+              </div>
+              <div>
+                <label htmlFor="session_edit" className="block text-sm font-medium text-gray-700">Session</label>
+                <select id="session_edit" name="session" required value={formData.session} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
+                  <option value="">Select session</option>
+                  <option value="2025/2026">2025/2026</option>
+                  <option value="2026/2027">2026/2027</option>
+                  <option value="2027/2028">2027/2028</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="term_edit" className="block text-sm font-medium text-gray-700">Term</label>
+                <select id="term_edit" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
+                  <option value="">Select term</option>
+                  <option value="First Term">First Term</option>
+                  <option value="Second Term">Second Term</option>
+                  <option value="Third Term">Third Term</option>
+                </select>
+              </div>
+            </div>
+
+            { /* Subjects selection and scores (prefilled from formData) */ }
+            {(formData.subjects.length > 0 || subjects.length > 0) && (
+              <>
+                <div className="border-t border-gray-200 pt-4">
+                  <h4 className="text-sm font-medium text-gray-900 mb-4">Edit Subjects & Scores</h4>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">1st</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">2nd</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {formData.subjects.map(subject => (
+                          <tr key={subject.id}>
+                            <td className="px-3 py-2 text-sm font-medium text-gray-900">{subject.name}</td>
+                            <td className="px-3 py-2"><input type="number" value={subject.firstTest} onChange={e => {
+                              handleSubjectScoreChange(subject.id, 'firstTest', e.target.value);
+                            }} className="w-16 shadow-sm text-sm border-gray-300 rounded-md" /></td>
+                            <td className="px-3 py-2"><input type="number" value={subject.secondTest} onChange={e => {
+                              handleSubjectScoreChange(subject.id, 'secondTest', e.target.value);
+                            }} className="w-16 shadow-sm text-sm border-gray-300 rounded-md" /></td>
+                            <td className="px-3 py-2"><input type="number" value={subject.thirdTest} onChange={e => {
+                              handleSubjectScoreChange(subject.id, 'thirdTest', e.target.value);
+                            }} className="w-16 shadow-sm text-sm border-gray-300 rounded-md" /></td>
+                            <td className="px-3 py-2"><input type="number" value={subject.exam} onChange={e => {
+                              handleSubjectScoreChange(subject.id, 'exam', e.target.value);
+                            }} className="w-16 shadow-sm text-sm border-gray-300 rounded-md" /></td>
+                            <td className="px-3 py-2 text-sm text-gray-900">{subject.total}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="mt-4">
+              <label htmlFor="teacherComment_edit" className="block text-sm font-medium text-gray-700">Teacher's Comment</label>
+              <textarea id="teacherComment_edit" name="teacherComment" rows={3} value={formData.teacherComment} onChange={e => setFormData(prev => ({ ...prev, teacherComment: e.target.value }))} className="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm text-sm border-gray-300 rounded-md" />
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t border-gray-100">
+              <button type="button" onClick={() => { setShowEditModal(false); resetForm(); }} className="px-3 py-2 rounded border bg-white text-sm">Cancel</button>
+              <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Save Changes</button>
             </div>
           </div>
         </form>

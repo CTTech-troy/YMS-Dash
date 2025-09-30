@@ -37,7 +37,8 @@ const SubjectManagement = () => {
           map[key].subjects.push({
             id: s.id || s._id || `${s.subjectName}-${Math.random().toString(36).slice(2, 8)}`,
             name: s.subjectName || s.name || 'Unnamed Subject',
-            class: s.subjectClass || s.class || 'Unknown'
+            class: s.subjectClass || s.class || 'Unknown',
+            subjectCode: s.subjectCode || s.code || ''
           });
         });
         const list = Object.values(map);
@@ -125,14 +126,14 @@ const SubjectManagement = () => {
   );
 
   return <DashboardLayout title="Subject Management">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <h1 className="text-2xl font-semibold text-gray-900">
           Teacher Subjects
         </h1>
       </div>
 
       {/* Search */}
-      <div className="bg-white shadow rounded-lg p-6 mb-6">
+      <div className="bg-white shadow rounded-lg p-4 sm:p-6 mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
           <div className="w-full sm:w-96">
             <label htmlFor="search" className="sr-only">Search</label>
@@ -148,44 +149,70 @@ const SubjectManagement = () => {
         </div>
       </div>
 
-      {/* Teachers Table */}
+      {/* Teachers Table (desktop) */}
       <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UID</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects Count</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredTeachers.map(teacher => <tr key={String(teacher.id || teacher.uid)}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-10 w-10">
-                      <img className="h-10 w-10 rounded-full object-cover" src={teacher.picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(teacher.name || teacher.uid || 'User')}&background=E5E7EB&color=374151`} alt={teacher.name || teacher.uid} />
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 hidden sm:table table-fixed">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UID</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects Count</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredTeachers.map(teacher => <tr key={String(teacher.id || teacher.uid)}>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10">
+                        <img loading="lazy" className="h-10 w-10 rounded-full object-cover" src={teacher.picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(teacher.name || teacher.uid || 'User')}&background=E5E7EB&color=374151`} alt={teacher.name || teacher.uid} />
+                      </div>
+                      <div className="ml-4">
+                        <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
+                      </div>
                     </div>
-                    <div className="ml-4">
-                      <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
-                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{teacher.uid || ''}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">{teacher.subjects.length} subjects</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <button onClick={() => handleViewSubjects(teacher)} className="text-blue-600 hover:text-blue-900 mr-3" aria-label={`View subjects for ${teacher.name || teacher.uid}`}>
+                      <EyeIcon className="h-5 w-5" />
+                    </button>
+                  </td>
+                </tr>)}
+              {filteredTeachers.length === 0 && <tr>
+                  <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">No teachers found matching your search.</td>
+                </tr>}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile cards */}
+        <div className="sm:hidden p-4 space-y-3">
+          {filteredTeachers.length === 0 && <div className="text-center text-sm text-gray-500">No teachers found matching your search.</div>}
+          {filteredTeachers.map(teacher => (
+            <div key={String(teacher.id || teacher.uid)} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+              <div className="flex items-center justify-between space-x-3">
+                <div className="flex items-center space-x-3">
+                  <img loading="lazy" className="h-12 w-12 rounded-full object-cover" src={teacher.picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(teacher.name || teacher.uid || 'User')}&background=E5E7EB&color=374151`} alt={teacher.name || teacher.uid} />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
+                    <div className="text-xs text-gray-500">{teacher.uid}</div>
                   </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{teacher.uid || ''}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">{teacher.subjects.length} subjects</span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button onClick={() => handleViewSubjects(teacher)} className="text-blue-600 hover:text-blue-900 mr-3">
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">{teacher.subjects.length} subjects</div>
+                  <button onClick={() => handleViewSubjects(teacher)} className="text-blue-600 hover:text-blue-900" aria-label={`View subjects for ${teacher.name || teacher.uid}`}>
                     <EyeIcon className="h-5 w-5" />
                   </button>
-                </td>
-              </tr>)}
-            {filteredTeachers.length === 0 && <tr>
-                <td colSpan="4" className="px-6 py-4 text-center text-sm text-gray-500">No teachers found matching your search.</td>
-              </tr>}
-          </tbody>
-        </table>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* View Subjects Modal */}
@@ -194,11 +221,11 @@ const SubjectManagement = () => {
           <div className="flex items-center justify-center min-h-screen px-4 text-center sm:block sm:p-0">
             <div className="fixed inset-0 bg-black bg-opacity-40 transition-opacity" onClick={handleCloseSubjectsModal} />
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
-            <div className={`inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full ${modalAnimateIn ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95'}`} style={{ transitionDuration: '180ms' }} onClick={(e) => e.stopPropagation()}>
-              <div className="bg-white px-6 pt-6 pb-4 sm:p-6 sm:pb-4">
+            <div className={`inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg max-w-full w-full ${modalAnimateIn ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95'}`} style={{ transitionDuration: '180ms' }} onClick={(e) => e.stopPropagation()}>
+              <div className="bg-white px-4 pt-6 pb-4 sm:p-6 sm:pb-4">
                 <div className="sm:flex sm:items-start">
                   <div className="flex-shrink-0">
-                    <img src={selectedTeacher.picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedTeacher.name || selectedTeacher.uid || 'User')}&background=E5E7EB&color=374151`} alt={selectedTeacher.name} className="h-12 w-12 rounded-full object-cover" />
+                    <img loading="lazy" src={selectedTeacher.picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedTeacher.name || selectedTeacher.uid || 'User')}&background=E5E7EB&color=374151`} alt={selectedTeacher.name} className="h-12 w-12 rounded-full object-cover" />
                   </div>
                   <div className="mt-3 sm:mt-0 sm:ml-4">
                     <h3 id="modal-title" className="text-lg leading-6 font-medium text-gray-900">{selectedTeacher.name}'s Subjects</h3>

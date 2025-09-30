@@ -184,28 +184,60 @@ const ClassAssignment = () => {
   // Helper: ensure image src is a proper data URI or passthrough URL
   const formatImageSrc = src => {
     if (!src) return '/placeholder.png';
-    const s = String(src).trim();
 
-    // already a data URL
-    if (s.startsWith('data:')) return s;
-
-    // absolute URL or root-relative path
-    if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
-
-    // contains "base64," but missing the data: prefix (e.g. "image/png;base64,AAA...")
-    if (s.includes('base64,')) {
-      // if starts directly with "base64," prepend default mime
-      if (s.startsWith('base64,')) {
-        return `data:image/jpeg;${s}`; // default to jpeg
+    // Handle Buffer-like / object pictures (e.g. { data: Uint8Array } or { data: 'base64...' })
+    if (typeof src === 'object' && src !== null) {
+      try {
+        if (src.data) {
+          const d = src.data;
+          // If data is already a base64 string
+          if (typeof d === 'string') {
+            src = d;
+          } else if (d instanceof Uint8Array || Array.isArray(d)) {
+            // convert bytes to base64
+            let binary = '';
+            for (let i = 0; i < d.length; i++) binary += String.fromCharCode(d[i]);
+            src = btoa(binary);
+          } else if (d.data && (d.data instanceof Uint8Array || Array.isArray(d.data))) {
+            let arr = d.data;
+            let binary = '';
+            for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+            src = btoa(binary);
+          }
+        } else {
+          return '/placeholder.png';
+        }
+      } catch (e) {
+        return '/placeholder.png';
       }
-      // if it already looks like "image/png;base64,..." but missing "data:" prefix
-      if (!s.startsWith('data:')) {
-        return `data:${s}`;
-      }
-      return s;
     }
 
-    // raw base64 without "base64," marker -> detect and wrap
+    let s = String(src).trim();
+    if (!s) return '/placeholder.png';
+
+    // Already a data URI
+    if (s.startsWith('data:')) return s;
+
+    // Absolute URL or root-relative path
+    if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
+
+    // Starts with "base64,..." -> assume jpeg
+    if (s.startsWith('base64,')) {
+      return `data:image/jpeg;base64,${s.slice(7)}`;
+    }
+
+    // Contains "base64," but missing "data:" prefix
+    if (s.includes('base64,')) {
+      // If it looks like "image/png;base64,AAA..." just prefix with data:
+      if (/^[a-zA-Z0-9\-\/]+;base64,/.test(s) || s.startsWith('image/')) {
+        return `data:${s}`;
+      }
+      // otherwise take the part after base64, and assume jpeg
+      const idx = s.indexOf('base64,');
+      return `data:image/jpeg;base64,${s.slice(idx + 7)}`;
+    }
+
+    // Raw base64 without "base64," marker -> detect and wrap
     const base64Only = s.replace(/\s+/g, '');
     const isBase64Like = base64Only.length > 50 && /^[A-Za-z0-9+/=]+$/.test(base64Only);
     if (isBase64Like) {
@@ -228,7 +260,6 @@ const ClassAssignment = () => {
         <h1 className="text-2xl font-semibold text-gray-900">
           Teacher-Class Assignments
         </h1>
-        {/* top "Assign Class" button removed */}
       </div>
       <div className="bg-white shadow overflow-hidden sm:rounded-lg">
         <div className="px-4 py-5 sm:px-6">
@@ -240,78 +271,131 @@ const ClassAssignment = () => {
           </p>
         </div>
         <div className="border-t border-gray-200">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Teacher
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  UID
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Assigned Class
-                </th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {teachers.map(teacher => <tr key={teacher.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <img className="h-12 w-12 rounded-full object-cover" 
-                        src={teacher.picture ? `data:image/jpeg;base64,${teacher.picture}` : "/placeholder.png"}/>
-                      </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">
-                          {teacher.name}
+          {/* Desktop table */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 hidden sm:table">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Teacher
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    UID
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Assigned Class
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {teachers.map(teacher => <tr key={teacher.id}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0 h-10 w-10">
+                          <img
+                            className="h-12 w-12 rounded-full object-cover" src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"}                            alt={teacher.name || 'avatar'}
+                            src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"}
+                            alt={teacher.name || 'avatar'}
+                            onError={(e) => { e.currentTarget.src = '/placeholder.png'; e.currentTarget.onerror = null; }}
+                          />
+                        </div>
+                        <div className="ml-4">
+                          <div className="text-sm font-medium text-gray-900">
+                            {teacher.name}
+                          </div>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{teacher.uid}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${teacher.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {teacher.status === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {teacher.class ? <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                          {teacher.class}
+                        </span> : <span className="text-sm text-gray-500">
+                          Not assigned
+                        </span>}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      {teacher.class && <>
+                          <button onClick={() => handleEditAssignment(teacher)} className="text-indigo-600 hover:text-indigo-900 mr-3">
+                            <PencilIcon className="h-5 w-5" />
+                          </button>
+                          <button onClick={() => handleRemoveAssignment(teacher.id)} className="text-red-600 hover:text-red-900">
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        </>}
+                      {!teacher.class && teacher.status === 'active' && <button onClick={() => {
+                    setFormData({
+                      teacherId: teacher.id.toString(),
+                      class: ''
+                    });
+                    setShowAssignModal(true);
+                  }} className="text-blue-600 hover:text-blue-900">
+                          <PlusIcon className="h-5 w-5" />
+                        </button>}
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile stacked cards */}
+          <div className="sm:hidden p-4 space-y-3">
+            {teachers.map(teacher => (
+              <div key={teacher.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <img className="h-12 w-12 rounded-full object-cover" src={formatImageSrc(teacher.picture)} alt={teacher.name || 'avatar'} />
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
+                      <div className="text-xs text-gray-500">{teacher.uid}</div>
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{teacher.uid}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${teacher.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                      {teacher.status === 'active' ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {teacher.class ? <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                        {teacher.class}
-                      </span> : <span className="text-sm text-gray-500">
-                        Not assigned
-                      </span>}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    {teacher.class && <>
-                        <button onClick={() => handleEditAssignment(teacher)} className="text-indigo-600 hover:text-indigo-900 mr-3">
+                  </div>
+                  <div className="text-right">
+                    <div className="mb-2">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${teacher.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {teacher.status === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <div className="mb-2">
+                      {teacher.class ? <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                          {teacher.class}
+                        </span> : <div className="text-xs text-gray-500">Not assigned</div>}
+                    </div>
+                    <div className="flex items-center justify-end space-x-2">
+                      {teacher.class && <>
+                        <button onClick={() => handleEditAssignment(teacher)} className="text-indigo-600 hover:text-indigo-900">
                           <PencilIcon className="h-5 w-5" />
                         </button>
                         <button onClick={() => handleRemoveAssignment(teacher.id)} className="text-red-600 hover:text-red-900">
                           <TrashIcon className="h-5 w-5" />
                         </button>
                       </>}
-                    {!teacher.class && teacher.status === 'active' && <button onClick={() => {
-                  setFormData({
-                    teacherId: teacher.id.toString(),
-                    class: ''
-                  });
-                  setShowAssignModal(true);
-                }} className="text-blue-600 hover:text-blue-900">
+                      {!teacher.class && teacher.status === 'active' && <button onClick={() => {
+                        setFormData({ teacherId: teacher.id.toString(), class: '' });
+                        setShowAssignModal(true);
+                      }} className="text-blue-600 hover:text-blue-900">
                         <PlusIcon className="h-5 w-5" />
                       </button>}
-                  </td>
-                </tr>)}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
         </div>
       </div>
       {/* Assign Class Modal */}
@@ -321,9 +405,9 @@ const ClassAssignment = () => {
             {/* Backdrop */}
             <div className="fixed inset-0 bg-black bg-opacity-50" aria-hidden="true" />
             {/* Modal */}
-            <div className="relative bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg sm:w-full">
+            <div className="relative bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg max-w-full w-full">
               <form onSubmit={handleSubmit}>
-                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4 max-h-[80vh] overflow-auto">
                   <div className="sm:flex sm:items-start">
                     <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
                       <h3 className="text-lg leading-6 font-medium text-gray-900">
@@ -343,7 +427,12 @@ const ClassAssignment = () => {
                               return (
                                 <div className="mt-1 flex items-center">
                                   <div className="flex-shrink-0 h-10 w-10">
-                                    <img className="h-12 w-12 rounded-full object-cover" src={formatImageSrc(t.picture)} alt={t.name || 'avatar'} />
+                                    <img
+                                      className="h-12 w-12 rounded-full object-cover"
+                                      src={formatImageSrc(t.picture)}
+                                      alt={t.name || 'avatar'}
+                                      onError={(e) => { e.currentTarget.src = '/placeholder.png'; e.currentTarget.onerror = null; }}
+                                    />
                                   </div>
                                   <div className="ml-4">
                                     <div className="text-sm font-medium text-gray-900">{t.name}</div>
@@ -409,9 +498,9 @@ const ClassAssignment = () => {
             {/* Backdrop */}
             <div className="fixed inset-0 bg-black bg-opacity-50" aria-hidden="true" />
             {/* Modal */}
-            <div className="relative bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg sm:w-full">
+            <div className="relative bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg max-w-full w-full">
               <form onSubmit={handleEditSubmit}>
-                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4 max-h-[80vh] overflow-auto">
                   <div className="sm:flex sm:items-start">
                     <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
                       <h3 className="text-lg leading-6 font-medium text-gray-900">
@@ -424,7 +513,12 @@ const ClassAssignment = () => {
                           </label>
                           <div className="mt-1 flex items-center">
                             <div className="flex-shrink-0 h-10 w-10">
-                              <img className="h-12 w-12 rounded-full object-cover" src={formatImageSrc(selectedTeacher.picture)} alt={selectedTeacher.name || 'avatar'} />
+                              <img
+                                className="h-12 w-12 rounded-full object-cover"
+                                src={formatImageSrc(selectedTeacher.picture)}
+                                alt={selectedTeacher.name || 'avatar'}
+                                onError={(e) => { e.currentTarget.src = '/placeholder.png'; e.currentTarget.onerror = null; }}
+                              />
                             </div>
                             <div className="ml-4">
                               <div className="text-sm font-medium text-gray-900">

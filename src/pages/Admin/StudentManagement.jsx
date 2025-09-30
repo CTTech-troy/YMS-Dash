@@ -1,75 +1,25 @@
 // src/pages/Admin/StudentManagement.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
-import { PlusIcon, PencilIcon, TrashIcon, EyeIcon } from 'lucide-react';
+import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, DownloadCloud } from 'lucide-react';
 import { toast } from 'sonner';
-
-const API_BASE = import.meta.env.VITE_API_URL;
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const StudentManagement = () => {
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [editableStudent, setEditableStudent] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
+  const [isAdding, setIsAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef(null);
-
-  // separate file input for the view/edit modal
   const editFileInputRef = useRef(null);
-
-  // keep simple file selection (no drag/drop)
-  const handleEditFileChange = e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Select an image file.');
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      // reader.result is a data URL (data:<mime>;base64,...)
-      setEditableStudent(prev => ({ ...prev, picture: reader.result }));
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
-
-  // --- Edit-Modal guardian helpers (were missing and caused render errors) ---
-  const editGuardianChange = (index, field, value) => {
-    setEditableStudent(prev => {
-      if (!prev) return prev;
-      const g = prev.guardians ? [...prev.guardians] : [{ name: '', phone: '', email: '', relationship: 'Father' }];
-      g[index] = { ...g[index], [field]: value };
-      return { ...prev, guardians: g };
-    });
-  };
-
-  const addEditableGuardian = () => {
-    setEditableStudent(prev => {
-      const g = prev?.guardians ? [...prev.guardians] : [];
-      if (g.length >= 3) { toast.error('Maximum of 3 guardians allowed.'); return prev; }
-      g.push({ name: '', phone: '', email: '', relationship: 'Father' });
-      return { ...prev, guardians: g };
-    });
-  };
-
-  const removeEditableGuardian = idx => {
-    setEditableStudent(prev => {
-      if (!prev || !prev.guardians) return prev;
-      const g = [...prev.guardians];
-      g.splice(idx, 1);
-      if (g.length === 0) g.push({ name: '', phone: '', email: '', relationship: 'Father' });
-      return { ...prev, guardians: g };
-    });
-  };
-  // -----------------------------------------------------------------------
 
   const emptyForm = {
     name: '',
@@ -87,11 +37,9 @@ const StudentManagement = () => {
     medicalConditions: '',
     emergencyContactName: '',
     emergencyContactPhone: '',
-    joinDate: '',
     subjects: [],
     religion: ''
   };
-
   const [formData, setFormData] = useState(emptyForm);
 
   useEffect(() => {
@@ -100,25 +48,20 @@ const StudentManagement = () => {
     return () => { document.body.style.overflow = prev || ''; };
   }, [showAddModal, showViewModal]);
 
-  // safer guardian extraction to avoid precedence bugs / runtime errors
   const normalizeStudent = raw => {
     if (!raw) return raw;
     let guardians = [];
     if (Array.isArray(raw.guardians) && raw.guardians.length) guardians = raw.guardians;
     else if (raw.guardian && typeof raw.guardian === 'object') guardians = [raw.guardian];
-
-    // Map boolean gender from DB to display string
     let genderStr = raw.gender;
     if (typeof raw.gender === 'boolean') genderStr = raw.gender ? 'Male' : 'Female';
-    else if (!raw.gender) genderStr = 'Male'; // default if missing
-
+    else if (!raw.gender) genderStr = 'Male';
     let picture = '';
     if (!raw.picture) picture = '';
-    else if (typeof raw.picture === 'string') picture = raw.picture; // legacy plain url or data URL
+    else if (typeof raw.picture === 'string') picture = raw.picture;
     else if (typeof raw.picture === 'object' && raw.picture.mime && raw.picture.data) {
       picture = `data:${raw.picture.mime};base64,${raw.picture.data}`;
     }
-
     return {
       ...raw,
       guardians,
@@ -129,6 +72,14 @@ const StudentManagement = () => {
     };
   };
 
+  const normalizePictureForSubmission = (p) => {
+    if (!p) return "";
+    if (typeof p === "string") return p;
+    if (typeof p === "object" && p.mime && p.data) return `data:${p.mime};base64,${p.data}`;
+    if (typeof p === "object" && (p.url || p.src)) return p.url || p.src || "";
+    return "";
+  };
+
   useEffect(() => {
     const fetchStudents = async () => {
       setIsLoading(true);
@@ -136,7 +87,6 @@ const StudentManagement = () => {
         const res = await fetch(`${API_BASE}/api/students`);
         if (!res.ok) throw new Error(`Server ${res.status}`);
         const payload = await res.json();
-        // backend returns { success: true, data: students }
         const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
         setStudents(list.map(normalizeStudent));
       } catch (err) {
@@ -155,68 +105,31 @@ const StudentManagement = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleGuardianChange = (index, field, value) => {
-    setFormData(prev => {
-      const g = prev.guardians ? [...prev.guardians] : [];
-      g[index] = { ...g[index], [field]: value };
-      return { ...prev, guardians: g };
-    });
-  };
-
-  const addGuardian = () => {
-    setFormData(prev => {
-      const g = prev.guardians ? [...prev.guardians] : [];
-      if (g.length >= 3) {
-        toast.error('Maximum of 3 guardians allowed.');
-        return prev;
-      }
-      g.push({ name: '', phone: '', email: '', relationship: 'Father' });
-      return { ...prev, guardians: g };
-    });
-  };
-
-  const removeGuardian = idx => {
-    setFormData(prev => {
-      const g = prev.guardians ? [...prev.guardians] : [];
-      g.splice(idx, 1);
-      if (g.length === 0) g.push({ name: '', phone: '', email: '', relationship: 'Father' });
-      return { ...prev, guardians: g };
-    });
-  };
-
   const handleFileChange = e => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Select an image file.');
-      e.target.value = '';
-      return;
-    }
+    if (!file.type.startsWith('image/')) { toast.error('Select an image file.'); e.target.value = ''; return; }
     const reader = new FileReader();
-    reader.onload = () => {
-      // store data URL (will be parsed by backend)
-      setFormData(prev => ({ ...prev, picture: reader.result }));
-    };
+    reader.onload = () => setFormData(prev => ({ ...prev, picture: reader.result }));
     reader.readAsDataURL(file);
     e.target.value = '';
   };
-
   const handlePictureClick = () => fileInputRef.current?.click();
 
   const handleSubmit = async e => {
     e.preventDefault();
+    setIsAdding(true);
     const payload = {
       name: formData.name,
       linNumber: formData.linNumber,
       dob: formData.dob,
-      // send boolean to backend: true = Male, false = Female
       gender: typeof formData.gender === 'boolean' ? formData.gender : (String(formData.gender).toLowerCase() === 'male'),
       class: formData.class,
       stateOfOrigin: formData.stateOfOrigin,
       lga: formData.lga,
       address: formData.address,
       guardians: formData.guardians,
-      picture: formData.picture,
+      picture: normalizePictureForSubmission(formData.picture),
       bloodGroup: formData.bloodGroup,
       allergies: formData.allergies,
       medicalConditions: formData.medicalConditions,
@@ -225,7 +138,6 @@ const StudentManagement = () => {
       subjects: formData.subjects || [],
       religion: formData.religion || ''
     };
-
     try {
       const res = await fetch(`${API_BASE}/api/students`, {
         method: 'POST',
@@ -245,6 +157,8 @@ const StudentManagement = () => {
     } catch (err) {
       console.error(err);
       toast.error('Failed to add student.');
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -252,28 +166,11 @@ const StudentManagement = () => {
     setSelectedStudent(student);
     setEditableStudent({
       ...student,
-      // Ensure gender is a display string in the edit modal
       gender: typeof student.gender === 'boolean' ? (student.gender ? 'Male' : 'Female') : (student.gender || 'Male'),
       guardians: student.guardians || (student.guardian ? [student.guardian] : [{ name: '', phone: '', email: '', relationship: 'Father' }])
     });
     setIsEditing(false);
     setShowViewModal(true);
-  };
-
-
-  const handleCancelEdit = () => {
-    if (!selectedStudent) {
-      setEditableStudent(null);
-      setIsEditing(false);
-      setShowViewModal(false);
-      return;
-    }
-    setEditableStudent({
-      ...selectedStudent,
-      guardians: selectedStudent.guardians || (selectedStudent.guardian ? [selectedStudent.guardian] : [{ name: '', phone: '', email: '', relationship: 'Father' }])
-    });
-    setIsEditing(false);
-    toast('Edit cancelled');
   };
 
   const handleSave = async () => {
@@ -282,12 +179,10 @@ const StudentManagement = () => {
     try {
       const payload = { ...editableStudent };
       payload.guardians = payload.guardians || (payload.guardian ? [payload.guardian] : []);
-      // normalize gender to boolean for backend
-      if (payload.gender === true || payload.gender === false) {
-        // already boolean
-      } else {
+      if (!(payload.gender === true || payload.gender === false)) {
         payload.gender = String(payload.gender).toLowerCase() === 'male';
       }
+      payload.picture = normalizePictureForSubmission(payload.picture);
       const method = payload.id ? 'PUT' : 'POST';
       const url = payload.id ? `${API_BASE}/api/students/${payload.id}` : `${API_BASE}/api/students`;
       const res = await fetch(url, {
@@ -341,57 +236,153 @@ const StudentManagement = () => {
     return `YMS-${String(newId).padStart(3, '0')}`;
   };
 
+  const handleDownloadPdf = () => {
+    if (!students || students.length === 0) {
+      toast.error('No students to export');
+      return;
+    }
+    try {
+      const doc = new jsPDF({ unit: 'pt', format: 'A4' });
+      doc.setFontSize(16);
+      doc.text('Students', 40, 40);
+      const head = [['Full name', 'Class', 'LIN Number', 'UID']];
+      const body = students.map(s => [s.name || '', s.class || '', s.linNumber || '', s.uid || s.id || '']);
+      const tableOptions = { startY: 70, head, body, theme: 'striped', styles: { fontSize: 9, cellPadding: 4 }, headStyles: { fillColor: [37, 99, 235] } };
+      if (typeof doc.autoTable === 'function') doc.autoTable(tableOptions);
+      else if (typeof autoTable === 'function') autoTable(doc, tableOptions);
+      else throw new Error('autoTable not available');
+      doc.save('students.pdf');
+    } catch (err) {
+      console.error('Export PDF failed', err);
+      toast.error('Failed to generate PDF');
+    }
+  };
+
+  // Filtering
+  const q = (searchQuery || '').trim().toLowerCase();
+  const filteredStudents = q ? students.filter(s => {
+    const fields = [
+      s.name, s.uid, s.linNumber, s.class,
+      (s.guardians && s.guardians[0] && s.guardians[0].name) || '',
+      (s.guardians && s.guardians[0] && s.guardians[0].phone) || '',
+      (s.guardians && s.guardians[0] && s.guardians[0].email) || ''
+    ].map(v => (v || '').toString().toLowerCase());
+    return fields.some(f => f.includes(q));
+  }) : students;
+
+  // Helper for editing guardian fields in editableStudent
+  const editGuardianChange = (idx, field, value) => {
+    setEditableStudent(prev => {
+      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+      guardians[idx] = { ...guardians[idx], [field]: value };
+      return { ...prev, guardians };
+    });
+  };
+
+  // Helper for removing a guardian in editableStudent
+  const removeEditableGuardian = (idx) => {
+    setEditableStudent(prev => {
+      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+      guardians.splice(idx, 1);
+      return { ...prev, guardians };
+    });
+  };
+
+  // Helper for adding a guardian in editableStudent
+  const addEditableGuardian = () => {
+    setEditableStudent(prev => {
+      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+      guardians.push({ name: '', phone: '', email: '', relationship: 'Father' });
+      return { ...prev, guardians };
+    });
+  };
+
+  // Add this handler near other handlers (e.g. after handleDownloadPdf)
+  const handlePromoteAll = async () => {
+    if (!confirm('Promote all students to the next class?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/students/promote`, { method: 'POST' });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Server ${res.status}`);
+      }
+      const payload = await res.json();
+      const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
+      setStudents(list.map(normalizeStudent));
+      toast.success('Promotion completed');
+    } catch (err) {
+      console.error(err);
+      toast.error('Promotion failed');
+    }
+  };
+
   return (
     <DashboardLayout title="Student Management">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Students</h1>
-        <button type="button" onClick={() => { setFormData(emptyForm); setShowAddModal(true); }} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-          <PlusIcon className="h-5 w-5 mr-2" />
-          Add Student
-        </button>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-lg font-semibold text-gray-900">Students</h1>
+        <div className="flex items-center space-x-3">
+          <button type="button" onClick={() => { setFormData(emptyForm); setShowAddModal(true); }} className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
+            <PlusIcon className="h-5 w-5 mr-2" /> Add Student
+          </button>
+
+          <button type="button" onClick={handleDownloadPdf} disabled={students.length === 0} className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:opacity-60">
+            <DownloadCloud className="h-5 w-5 mr-2" /> Export PDF
+          </button>
+
+          {/* Promote All */}
+          <button type="button" onClick={handlePromoteAll} disabled={students.length === 0} className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-60">
+            Promote All
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white shadow rounded-lg p-4 mb-6">
+        <div className="w-full sm:w-96">
+          <label htmlFor="search" className="sr-only">Search</label>
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+            </div>
+            <input id="search" name="search" className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 text-sm" placeholder="Search by name, ID or email" type="search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-col">
         {isLoading ? (
-          <div className="py-12 flex items-center justify-center">
-            <div className="text-gray-600 font-medium">Loading…</div>
-          </div>
+          <div className="py-12 flex items-center justify-center"><div className="text-gray-600 font-medium">Loading…</div></div>
         ) : (
-          <div className="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div className="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+          <div className="-my-2 overflow-x-auto">
+            <div className="py-2 inline-block min-w-full sm:px-6 lg:px-8">
               <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UID</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Guardian</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Student</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">UID</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Class</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Guardian</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {students.length === 0 ? (
-                      <tr>
-                        <td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">No students found.</td>
-                      </tr>
-                    ) : students.map((student, idx) => (
+                    {filteredStudents.length === 0 ? (
+                      <tr><td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">{students.length === 0 ? 'No students found.' : 'No students match your search.'}</td></tr>
+                    ) : filteredStudents.map((student, idx) => (
                       <tr key={student.id || student.uid || idx}>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-3 py-2 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="flex-shrink-0 h-10 w-10">
-                              <img className="h-10 w-10 rounded-full object-cover" src={student.picture || '/placeholder.png'} alt="" />
-                            </div>
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900">{student.name}</div>
-                              <div className="text-sm text-gray-500">{student.dob} | {student.gender} | {student.age} Year's</div>
+                            <div className="flex-shrink-0 h-8 w-8"><img className="h-8 w-8 rounded-full object-cover" src={student.picture || '/placeholder.png'} alt="" /></div>
+                            <div className="ml-3">
+                              <div className="text-xs font-medium text-gray-900 truncate">{student.name}</div>
+                              <div className="text-xs text-gray-500 truncate">{student.dob} | {student.gender} | {student.age ? `${student.age} yrs` : '—'}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900">{student.uid || generateStudentId()}</div></td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{student.class}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(student.guardians && student.guardians[0]) ? `${student.guardians[0].name} (${student.guardians[0].relationship})` : '—'}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <td className="px-3 py-2 whitespace-nowrap"><div className="text-xs text-gray-900 truncate">{student.uid || generateStudentId()}</div></td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 truncate">{student.class}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 truncate">{(student.guardians && student.guardians[0]) ? `${student.guardians[0].name} (${student.guardians[0].relationship})` : '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
                           <button onClick={() => handleViewStudent(student)} className="text-blue-600 hover:text-blue-900 mr-3"><EyeIcon className="h-5 w-5" /></button>
                           <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="text-indigo-600 hover:text-indigo-900 mr-3"><PencilIcon className="h-5 w-5" /></button>
                           <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
@@ -406,33 +397,34 @@ const StudentManagement = () => {
         )}
       </div>
 
-      {/* Add modal simplified (keeps same layout previously used) */}
+      {/* Add Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => setShowAddModal(false)} />
           <div className="flex items-center justify-center min-h-screen p-4 text-center">
-            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-4xl w-full" onClick={e => e.stopPropagation()}>
+            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-3xl w-full" onClick={e => e.stopPropagation()}>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
               <form onSubmit={handleSubmit}>
-                <div className="bg-white px-6 py-5 sm:p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                    <div className="flex items-center space-x-4 md:col-span-1">
+                <div className="bg-white px-4 py-4 sm:p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                    <div className="flex items-center space-x-3 md:col-span-1">
                       <div onClick={handlePictureClick} className="h-20 w-20 rounded-full bg-blue-50 flex items-center justify-center cursor-pointer overflow-hidden">
-                        {formData.picture ? <img src={formData.picture} alt="profile" className="h-full w-full object-cover" /> : <PlusIcon className="h-6 w-6 text-blue-600" />}
+                        {formData.picture ? <img src={formData.picture} alt="profile" className="h-full w-full object-cover" /> : <PlusIcon className="h-5 w-5 text-blue-600" />}
                       </div>
                       <div className="flex-1 text-left">
-                        <label className="block text-sm font-medium text-gray-700">Full Name</label>
-                        <input required name="name" value={formData.name} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
+                        <label className="block text-xs font-medium text-gray-700">Full Name</label>
+                        <input required name="name" value={formData.name} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs" />
                       </div>
                     </div>
-                    <div className="md:col-span-2 flex space-x-4">
+
+                    <div className="md:col-span-2 flex space-x-3">
                       <div className="flex-1">
-                        <label className="block text-sm font-medium text-gray-700">LIN Number</label>
-                        <input name="linNumber" value={formData.linNumber} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
+                        <label className="block text-xs font-medium text-gray-700">LIN Number</label>
+                        <input name="linNumber" value={formData.linNumber} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs" />
                       </div>
                       <div className="w-40">
-                        <label className="block text-sm font-medium text-gray-700">Class</label>
-                        <select name="class" required value={formData.class} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
+                        <label className="block text-xs font-medium text-gray-700">Class</label>
+                        <select name="class" required value={formData.class} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs">
                           <option value="">Select</option>
                           <option>Creche</option>
                           <option>KG 1</option>
@@ -442,126 +434,40 @@ const StudentManagement = () => {
                           <option>Primary 1</option>
                           <option>Primary 2</option>
                           <option>Primary 3</option>
-                          <option>Primary 4</option>
-                          <option>Primary 6</option>
-                          <option>JSS1</option>
-                          <option>JSS2</option>
-                          {/* <option>JSS3</option>
-                          <option>SS1</option>
-                          <option>SS2</option>
-                          <option>SS3</option> */}
                         </select>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="col-span-1 p-3 rounded-md">
-                      <h4 className="text-sm font-semibold mb-2">Personal</h4>
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs text-gray-600">Date of Birth</label>
-                          <input type="date" name="dob" value={formData.dob} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Gender</label>
-                          <select name="gender" value={formData.gender} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                            <option>Male</option>
-                            <option>Female</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">religion</label>
-                          <select name="religion" value={formData.religion} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                            <option value="">Select</option>
-                            <option value="Christian">Christian</option>
-                            <option value="Muslim">Muslim</option>
-                            <option value="Other">Other</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">State of Origin</label>
-                          <input name="stateOfOrigin" value={formData.stateOfOrigin} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Local Government Area (LGA)</label>
-                          <input name="lga" value={formData.lga} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Address</label>
-                          <input name="address" value={formData.address} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                      </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-600">Date of Birth</label>
+                      <input type="date" name="dob" value={formData.dob} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
                     </div>
-
-                    <div className="col-span-1 p-3 rounded-md">
-                      <h4 className="text-sm font-semibold mb-2">Family / Guardians</h4>
-                      <div className="space-y-3">
-                        {formData.guardians.map((g, i) => (
-                          <div key={i} className="grid grid-cols-1 gap-2 md:grid-cols-4 items-end">
-                            <div>
-                              <label className="text-xs text-gray-600">Name</label>
-                              <input value={g.name} onChange={e => handleGuardianChange(i, 'name', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                            </div>
-                            <div>
-                              <label className="text-xs text-gray-600">Phone</label>
-                              <input value={g.phone} onChange={e => handleGuardianChange(i, 'phone', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                            </div>
-                            <div>
-                              <label className="text-xs text-gray-600">Email</label>
-                              <input value={g.email} onChange={e => handleGuardianChange(i, 'email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                            </div>
-                            <div>
-                              <label className="text-xs text-gray-600">Relation</label>
-                              <select value={g.relationship} onChange={e => handleGuardianChange(i, 'relationship', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                                <option>Father</option>
-                                <option>Mother</option>
-                                <option>Guardian</option>
-                                <option>Other</option>
-                              </select>
-                              <div className="mt-1">
-                                {formData.guardians.length > 1 && <button type="button" onClick={() => removeGuardian(i)} className="text-xs text-red-600 hover:underline">Remove</button>}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        <div>
-                          <button type="button" onClick={addGuardian} className="inline-flex items-center px-3 py-1 border border-transparent rounded-md shadow-sm text-sm text-white bg-blue-600 hover:bg-blue-700">Add guardian</button>
-                        </div>
-                      </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Gender</label>
+                      <select name="gender" value={formData.gender} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
+                        <option>Male</option>
+                        <option>Female</option>
+                      </select>
                     </div>
-
-                    <div className="col-span-1 p-3 rounded-md">
-                      <h4 className="text-sm font-semibold mb-2">Medical / Emergency</h4>
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs text-gray-600">Blood Group</label>
-                          <input name="bloodGroup" value={formData.bloodGroup} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Allergies</label>
-                          <input name="allergies" value={formData.allergies} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Medical Conditions</label>
-                          <input name="medicalConditions" value={formData.medicalConditions} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600">Emergency Contact</label>
-                          <input name="emergencyContactName" value={formData.emergencyContactName} onChange={handleInputChange} placeholder="Name" className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                          <input name="emergencyContactPhone" value={formData.emergencyContactPhone} onChange={handleInputChange} placeholder="Phone" className="mt-2 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </div>
-                      </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Religion</label>
+                      <select name="religion" value={formData.religion} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
+                        <option value="">Select</option>
+                        <option value="Christian">Christian</option>
+                        <option value="Muslim">Muslim</option>
+                        <option value="Other">Other</option>
+                      </select>
                     </div>
                   </div>
-
-                  
-
                 </div>
 
                 <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                  <button type="submit" className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm">Add Student</button>
-                  <button type="button" onClick={() => setShowAddModal(false)} className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
+                  <button type="submit" disabled={isAdding} className={`w-full inline-flex items-center justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm ${isAdding ? 'opacity-80 cursor-not-allowed' : ''}`}>
+                    {isAdding ? <> <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle></svg> Adding...</> : 'Add Student'}
+                  </button>
+                  <button type="button" onClick={() => setShowAddModal(false)} className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 px-4 py-2 bg-white text-base text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
                 </div>
               </form>
             </div>
@@ -569,82 +475,54 @@ const StudentManagement = () => {
         </div>
       )}
 
-      {/* View / Edit Student Modal - full preview + editable when isEditing */}
+      {/* View / Edit Modal */}
       {showViewModal && editableStudent && (
         <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => { setShowViewModal(false); setIsEditing(false); setEditableStudent(null); }} />
           <div className="flex items-center justify-center min-h-screen p-4 text-center">
-            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-4xl w-full" onClick={e => e.stopPropagation()}>
-              <input ref={editFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleEditFileChange} />
+            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+              <input ref={editFileInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => setEditableStudent(prev => ({ ...prev, picture: reader.result }));
+                reader.readAsDataURL(file);
+                e.target.value = '';
+              }} />
 
-              <div className="bg-white px-6 py-5 sm:p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                  <div className="flex items-center space-x-4 md:col-span-1">
-                    <div
-                      onClick={() => (isEditing ? editFileInputRef.current?.click() : null)}
-                      className="h-20 w-20 rounded-full bg-blue-50 flex items-center justify-center cursor-pointer overflow-hidden"
-                      title={isEditing ? 'Click to change picture' : 'Profile picture'}
-                    >
-                      {editableStudent.picture ? (
-                        <img src={editableStudent.picture} alt="profile" className="h-full w-full object-cover" />
-                      ) : (
-                        <PlusIcon className="h-6 w-6 text-blue-600" />
-                      )}
+              <div className="bg-white px-4 py-4 sm:p-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                  <div className="flex items-center space-x-3 md:col-span-1">
+                    <div onClick={() => (isEditing ? editFileInputRef.current?.click() : null)} className="h-20 w-20 rounded-full bg-blue-50 flex items-center justify-center cursor-pointer overflow-hidden">
+                      {editableStudent.picture ? <img src={editableStudent.picture} alt="profile" className="h-full w-full object-cover" /> : <PlusIcon className="h-6 w-6 text-blue-600" />}
                     </div>
                     <div className="flex-1 text-left">
                       {isEditing ? (
-                        <>
-                          <label className="block text-sm font-medium text-gray-700">Full Name</label>
-                          <input value={editableStudent.name || ''} onChange={e => setEditableStudent(prev => ({ ...prev, name: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                        </>
+                        <input value={editableStudent.name || ''} onChange={e => setEditableStudent(prev => ({ ...prev, name: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
                       ) : (
-                        <div>
+                        <>
                           <div className="text-lg font-medium text-gray-900">{editableStudent.name || 'No name'}</div>
                           <div className="text-sm text-gray-500">Student ID: {editableStudent.uid || editableStudent.id || '—'}</div>
-                        </div>
+                        </>
                       )}
                     </div>
                   </div>
 
-                  <div className="md:col-span-2 flex space-x-4">
+                  <div className="md:col-span-2 flex space-x-3">
                     <div className="flex-1">
-                      <label className="text-xs text-gray-600">LIN Number</label>
-                      {isEditing ? (
-                        <input value={editableStudent.linNumber || ''} onChange={e => setEditableStudent(prev => ({ ...prev, linNumber: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
-                      ) : (
-                        <div className="mt-1 text-sm text-gray-700">{editableStudent.linNumber || '—'}</div>
-                      )}
+                      {isEditing ? <input value={editableStudent.linNumber || ''} onChange={e => setEditableStudent(prev => ({ ...prev, linNumber: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" /> : <div className="mt-1 text-sm text-gray-700">{editableStudent.linNumber || '—'}</div>}
                     </div>
                     <div className="w-40">
-                      <label className="text-xs text-gray-600">Class</label>
                       {isEditing ? (
                         <select value={editableStudent.class || ''} onChange={e => setEditableStudent(prev => ({ ...prev, class: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                          <option value="">Select</option>
-                          <option>Creche</option>
-                          <option>KG 1</option>
-                          <option>KG 2</option>
-                          <option>Nursery 1</option>
-                          <option>Nursery 2</option>
-                          <option>Primary 1</option>
-                          <option>Primary 2</option>
-                          <option>Primary 3</option>
-                          <option>Primary 4</option>
-                          <option>Primary 6</option>
-                          <option>JSS1</option>
-                          <option>JSS2</option>
-                          {/* <option>JSS3</option>
-                          <option>SS1</option>
-                          <option>SS2</option>
-                          <option>SS3</option> */}
+                          <option value="">Select</option><option>Creche</option><option>KG 1</option><option>KG 2</option>
                         </select>
-                      ) : (
-                        <div className="mt-1 text-sm text-gray-700">{editableStudent.class || '—'}</div>
-                      )}
+                      ) : <div className="mt-1 text-sm text-gray-700">{editableStudent.class || '—'}</div>}
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Personal */}
                   <div className="col-span-1 p-3 rounded-md">
                     <h4 className="text-sm font-semibold mb-2">Personal</h4>
@@ -791,13 +669,13 @@ const StudentManagement = () => {
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                 {isEditing ? (
                   <>
-                    <button type="button" onClick={handleSave} disabled={isSaving} className={`w-full inline-flex items-center justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm ${isSaving ? 'opacity-80 cursor-not-allowed' : ''}`}>{isSaving ? 'Saving...' : 'Save'}</button>
-                    <button type="button" onClick={handleCancelEdit} disabled={isSaving} className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
+                    <button type="button" onClick={handleSave} disabled={isSaving} className={`w-full inline-flex items-center justify-center rounded-md px-4 py-2 bg-blue-600 text-white sm:ml-3 sm:w-auto sm:text-sm ${isSaving ? 'opacity-80' : ''}`}>{isSaving ? 'Saving...' : 'Save'}</button>
+                    <button type="button" onClick={() => { setIsEditing(false); setEditableStudent(selectedStudent); }} disabled={isSaving} className="mt-3 w-full inline-flex justify-center rounded-md px-4 py-2 bg-white text-gray-700 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
                   </>
                 ) : (
                   <>
-                    <button type="button" onClick={() => setIsEditing(true)} className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm">Edit Student</button>
-                    <button type="button" onClick={() => { setShowViewModal(false); setEditableStudent(null); setIsEditing(false); }} className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Close</button>
+                    <button type="button" onClick={() => setIsEditing(true)} className="w-full inline-flex justify-center rounded-md px-4 py-2 bg-blue-600 text-white sm:ml-3 sm:w-auto sm:text-sm">Edit Student</button>
+                    <button type="button" onClick={() => { setShowViewModal(false); setEditableStudent(null); setIsEditing(false); }} className="mt-3 w-full inline-flex justify-center rounded-md px-4 py-2 bg-white text-gray-700 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Close</button>
                   </>
                 )}
               </div>

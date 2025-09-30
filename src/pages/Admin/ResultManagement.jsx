@@ -3,160 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
 import { EyeIcon, CheckIcon, XIcon, MessageCircleIcon } from 'lucide-react';
 import { toast } from 'sonner';
-// Sample results data
-const initialResults = [{
-  id: 1,
-  studentName: 'Alex Johnson',
-  studentId: 'YMS-001',
-  class: 'Class 4B',
-  session: '2022/2023',
-  term: 'First Term',
-  subjects: [{
-    id: 1,
-    name: 'Mathematics',
-    firstTest: 25,
-    secondTest: 18,
-    thirdTest: 28,
-    exam: 65,
-    total: 136,
-    percentage: 68,
-    grade: 'B'
-  }, {
-    id: 2,
-    name: 'English Language',
-    firstTest: 27,
-    secondTest: 20,
-    thirdTest: 25,
-    exam: 70,
-    total: 142,
-    percentage: 71,
-    grade: 'B'
-  }, {
-    id: 3,
-    name: 'Science',
-    firstTest: 28,
-    secondTest: 22,
-    thirdTest: 29,
-    exam: 75,
-    total: 154,
-    percentage: 77,
-    grade: 'A'
-  }, {
-    id: 4,
-    name: 'Social Studies',
-    firstTest: 26,
-    secondTest: 19,
-    thirdTest: 27,
-    exam: 68,
-    total: 140,
-    percentage: 70,
-    grade: 'B'
-  }],
-  teacherComment: 'Alex is a diligent student. Needs to improve in some areas but shows great potential.',
-  principalComment: 'Good performance. Keep working hard.',
-  status: 'published',
-  lastUpdated: '2023-06-15',
-  picture: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
-}, {
-  id: 2,
-  studentName: 'Sarah Brown',
-  studentId: 'YMS-004',
-  class: 'Class 3A',
-  session: '2022/2023',
-  term: 'First Term',
-  subjects: [{
-    id: 1,
-    name: 'Mathematics',
-    firstTest: 22,
-    secondTest: 15,
-    thirdTest: 20,
-    exam: 60,
-    total: 117,
-    percentage: 58.5,
-    grade: 'C'
-  }, {
-    id: 2,
-    name: 'English Language',
-    firstTest: 24,
-    secondTest: 18,
-    thirdTest: 22,
-    exam: 65,
-    total: 129,
-    percentage: 64.5,
-    grade: 'C'
-  }],
-  teacherComment: 'Sarah needs to work harder on her Mathematics.',
-  principalComment: '',
-  status: 'pending',
-  lastUpdated: '2023-06-14',
-  picture: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
-}, {
-  id: 3,
-  studentName: 'Emily Davis',
-  studentId: 'YMS-002',
-  class: 'Class 5A',
-  session: '2022/2023',
-  term: 'First Term',
-  subjects: [{
-    id: 1,
-    name: 'Mathematics',
-    firstTest: 28,
-    secondTest: 25,
-    thirdTest: 29,
-    exam: 80,
-    total: 162,
-    percentage: 81,
-    grade: 'A'
-  }, {
-    id: 2,
-    name: 'English Language',
-    firstTest: 27,
-    secondTest: 26,
-    thirdTest: 28,
-    exam: 85,
-    total: 166,
-    percentage: 83,
-    grade: 'A'
-  }],
-  teacherComment: 'Emily is an excellent student with consistent performance.',
-  principalComment: 'Outstanding performance. Keep it up!',
-  status: 'published',
-  lastUpdated: '2023-06-15',
-  picture: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
-}, {
-  id: 4,
-  studentName: 'Michael Wilson',
-  studentId: 'YMS-003',
-  class: 'Class 5A',
-  session: '2022/2023',
-  term: 'First Term',
-  subjects: [{
-    id: 1,
-    name: 'Mathematics',
-    firstTest: 29,
-    secondTest: 28,
-    thirdTest: 30,
-    exam: 90,
-    total: 177,
-    percentage: 88.5,
-    grade: 'A'
-  }, {
-    id: 2,
-    name: 'English Language',
-    firstTest: 26,
-    secondTest: 25,
-    thirdTest: 27,
-    exam: 85,
-    total: 163,
-    percentage: 81.5,
-    grade: 'A'
-  }],
-  teacherComment: 'Michael shows exceptional abilities in Mathematics.',
-  principalComment: '',
-  status: 'pending',
-  lastUpdated: '2023-06-13',
-  picture: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
-}];
+
 const Modal = ({ open, title, onClose, children, maxWidth = 'sm:max-w-4xl' }) => {
   const containerRef = useRef(null);
 
@@ -196,8 +43,23 @@ const Modal = ({ open, title, onClose, children, maxWidth = 'sm:max-w-4xl' }) =>
   );
 };
 
+// API base config: trim env var and provide a safe local fallback for dev.
+const API_BASE = (import.meta?.env?.VITE_API_URL || '').trim();
+const FALLBACK_LOCAL_API = 'https://yms-backend-a2x4.onrender.com'; // change port if your backend uses a different port
+const API_HOST = API_BASE || FALLBACK_LOCAL_API;
+
+// helper to build full backend URL (avoids double slashes)
+const api = (path) => {
+  const base = API_HOST.replace(/\/$/, '');
+  if (!path) return base;
+  const p = path.startsWith('/') ? path : `/${path}`;
+  return base + p;
+};
+
 const ResultManagement = () => {
-  const [results, setResults] = useState(initialResults);
+  // removed sample data - load from API
+  const [results, setResults] = useState([]);
+  const [loadingResults, setLoadingResults] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
   const [selectedResult, setSelectedResult] = useState(null);
@@ -207,6 +69,9 @@ const ResultManagement = () => {
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [teacherResultsEnabled, setTeacherResultsEnabled] = useState(true);
   const [principalComment, setPrincipalComment] = useState('');
+  const [publishingIds, setPublishingIds] = useState([]); // track individual publish operations
+  const [publishingAll, setPublishingAll] = useState(false);
+
   // View result details
   const handleViewResult = result => {
     setSelectedResult(result);
@@ -219,51 +84,137 @@ const ResultManagement = () => {
     setShowCommentModal(true);
   };
   // Save principal comment
-  const handleSaveComment = () => {
+  const handleSaveComment = async () => {
     if (!selectedResult) return;
-    const updatedResults = results.map(result => {
-      if (result.id === selectedResult.id) {
-        return {
-          ...result,
-          principalComment: principalComment
-        };
+    const url = api(`/api/results/${selectedResult.id}`);
+    console.debug('PUT', url);
+    try {
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ principalComment })
+      });
+      const ct = resp.headers.get('content-type') || '';
+      const txt = await resp.text();
+      if (!resp.ok) {
+        console.error('Save comment response', resp.status, ct, txt.slice(0,300));
+        throw new Error(txt || `Failed to save comment (${resp.status})`);
       }
-      return result;
-    });
-    setResults(updatedResults);
-    setShowCommentModal(false);
-    toast.success('Principal comment added successfully!');
-  };
-  // Publish a single result
-  const handlePublishResult = id => {
-    const updatedResults = results.map(result => {
-      if (result.id === id) {
-        return {
-          ...result,
-          status: 'published'
-        };
+      if (!ct.includes('application/json')) {
+        throw new Error(`Expected JSON but received "${ct}". Response snippet: ${txt.slice(0,300)}`);
       }
-      return result;
-    });
-    setResults(updatedResults);
-    toast.success('Result published successfully!');
+      const updated = JSON.parse(txt);
+      const updatedResults = results.map(result => result.id === selectedResult.id ? {
+        ...result,
+        principalComment: updated.principalComment ?? principalComment
+      } : result);
+
+      setResults(updatedResults);
+      setShowCommentModal(false);
+      toast.success('Principal comment saved successfully!');
+    } catch (err) {
+      console.error('Save comment error:', err);
+      toast.error('Failed to save principal comment: ' + (err.message || ''));
+    }
   };
-  // Publish all pending results
-  const handlePublishAllResults = () => {
-    const updatedResults = results.map(result => {
-      if (result.status === 'pending') {
-        return {
-          ...result,
-          status: 'published'
-        };
+
+  // Publish a single result (calls backend)
+  const handlePublishResult = async (id) => {
+    if (!id) return;
+    if (publishingIds.includes(id)) return;
+    setPublishingIds(prev => [...prev, id]);
+    const url = api(`/api/results/${id}`);
+    console.debug('PUT', url);
+    try {
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ published: 'yes', publishedAt: new Date().toISOString() })
+      });
+      const ct = resp.headers.get('content-type') || '';
+      const txt = await resp.text();
+      if (!resp.ok) {
+        console.error('Publish response', resp.status, ct, txt.slice(0,300));
+        throw new Error(txt || `Failed to publish (${resp.status})`);
       }
-      return result;
-    });
-    setResults(updatedResults);
-    setShowPublishModal(false);
-    toast.success('All pending results published successfully!');
+      if (!ct.includes('application/json')) {
+        throw new Error(`Expected JSON but received "${ct}". Response snippet: ${txt.slice(0,300)}`);
+      }
+      const updated = JSON.parse(txt);
+      const updatedResults = results.map(r => r.id === id ? {
+        ...r,
+        status: (updated.published === 'yes' || updated.status === 'published') ? 'published' : r.status,
+        lastUpdated: updated.publishedAt ?? updated.updatedAt ?? new Date().toISOString()
+      } : r);
+      setResults(updatedResults);
+      toast.success('Result published successfully!');
+    } catch (err) {
+      console.error('Publish error:', err);
+      toast.error('Failed to publish result: ' + (err.message || ''));
+    } finally {
+      setPublishingIds(prev => prev.filter(x => x !== id));
+    }
   };
-  // Toggle teacher results access
+
+  // Publish all pending results (calls backend for each pending)
+  const handlePublishAllResults = async () => {
+    const pending = results.filter(r => r.status === 'pending');
+    if (pending.length === 0) {
+      setShowPublishModal(false);
+      return;
+    }
+    setPublishingAll(true);
+    try {
+      const promises = pending.map(r => {
+        const url = api(`/api/results/${r.id}`);
+        console.debug('PUT', url);
+        return fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ published: 'yes', publishedAt: new Date().toISOString() })
+        }).then(async resp => {
+          const ct = resp.headers.get('content-type') || '';
+          const txt = await resp.text();
+          if (!resp.ok) throw new Error(`Failed ${resp.status}: ${txt.slice(0,200)}`);
+          if (!ct.includes('application/json')) throw new Error(`Expected JSON but got ${ct}`);
+          return JSON.parse(txt);
+        }).catch(err => ({ error: true, id: r.id, message: err.message || String(err) }));
+      });
+
+      const settled = await Promise.allSettled(promises);
+      const successes = [];
+      const failures = [];
+      settled.forEach(s => {
+        if (s.status === 'fulfilled') {
+          const val = s.value;
+          if (val && val.error) failures.push(val);
+          else successes.push(val);
+        } else {
+          failures.push({ error: true, message: s.reason?.message || String(s.reason) });
+        }
+      });
+
+      // Update local state for successful publishes
+      const successIds = successes.map(s => s.id || s?.id).filter(Boolean);
+      const updatedResults = results.map(r => successIds.includes(r.id) ? { ...r, status: 'published', lastUpdated: new Date().toISOString() } : r);
+      setResults(updatedResults);
+
+      if (failures.length > 0) {
+        console.warn('Some publishes failed', failures);
+        toast.error(`Published ${successes.length} / ${pending.length}. Some failed.`);
+      } else {
+        toast.success(`All ${pending.length} results published.`);
+      }
+    } catch (err) {
+      console.error('Publish all error:', err);
+      toast.error('Failed to publish all results');
+    } finally {
+      setPublishingAll(false);
+      setShowPublishModal(false);
+    }
+  };
+
+  // Toggle teacher results access (frontend toggle)
   const handleToggleTeacherResults = () => {
     setTeacherResultsEnabled(!teacherResultsEnabled);
     if (teacherResultsEnabled) {
@@ -272,24 +223,27 @@ const ResultManagement = () => {
       toast.success('Teacher results section has been enabled');
     }
   };
+
   // Filter results based on search query and filters
   const filteredResults = results.filter(result => {
-    const matchesSearch = result.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || result.studentId.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (result.studentName || '').toLowerCase().includes(searchQuery.toLowerCase()) || (result.studentId || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesClass = filterClass ? result.class === filterClass : true;
     const matchesStatus = filterStatus ? result.status === filterStatus : true;
     return matchesSearch && matchesClass && matchesStatus;
   });
+
   // Get unique classes for filter
-  const classes = [...new Set(results.map(result => result.class))];
+  const classes = [...new Set(results.map(result => result.class).filter(Boolean))];
   // Count pending results
   const pendingResultsCount = results.filter(result => result.status === 'pending').length;
+
   // Calculate overall grade for a result
   const calculateOverallGrade = subjects => {
-    if (subjects.length === 0) return {
+    if (!Array.isArray(subjects) || subjects.length === 0) return {
       percentage: 0,
       grade: 'F'
     };
-    const totalPercentage = subjects.reduce((sum, subject) => sum + subject.percentage, 0);
+    const totalPercentage = subjects.reduce((sum, subject) => sum + (Number(subject.percentage) || 0), 0);
     const overallPercentage = totalPercentage / subjects.length;
     const grade = getGradeFromPercentage(overallPercentage);
     return {
@@ -307,16 +261,93 @@ const ResultManagement = () => {
     if (percentage >= 40) return 'E';
     return 'F';
   };
+
+  // Fetch results from backend API on mount
+  useEffect(() => {
+    const controller = new AbortController();
+    // try known endpoints (will work whether API_BASE is set or not)
+    const tryUrls = [
+      api('/api/results'),
+      api('/results')
+    ].filter(Boolean);
+
+    const fetchResults = async () => {
+      setLoadingResults(true);
+      let lastErr = null;
+
+      for (const url of tryUrls) {
+        console.debug('[Results] trying', url);
+        try {
+          const resp = await fetch(url, { signal: controller.signal });
+          const ct = resp.headers.get('content-type') || '';
+          const text = await resp.text().catch(() => '');
+
+          console.debug('[Results] response', { url, status: resp.status, contentType: ct, snippet: text.slice(0, 300) });
+
+          if (!resp.ok) {
+            lastErr = new Error(`Request to ${url} failed ${resp.status}`);
+            continue; // try next url
+          }
+
+          if (!ct.includes('application/json')) {
+            // server returned HTML (likely index.html or error page) — skip this URL
+            lastErr = new Error(`Expected JSON from ${url} but received "${ct}". Response snippet: ${text.slice(0,200)}`);
+            continue; // try next url
+          }
+
+          // parse JSON and map to UI shape
+          const data = JSON.parse(text || '[]');
+          const mapped = (Array.isArray(data) ? data : []).map(r => ({
+            id: r.id,
+            studentName: r.studentName || r.name || r.studentId || 'Unknown',
+            studentId: r.studentId || r.id || '',
+            class: r.class || r.className || '',
+            session: r.session || '',
+            term: r.term || '',
+            subjects: Array.isArray(r.subjects) ? r.subjects : [],
+            teacherComment: r.teacherComment || '',
+            principalComment: r.principalComment || '',
+            status: (r.published === 'yes') ? 'published' : (r.published === 'no' ? 'pending' : (r.status || 'pending')),
+            lastUpdated: r.publishedAt || r.updatedAt || r.createdAt || '',
+            picture: r.picture || ''
+          }));
+
+          setResults(mapped);
+          lastErr = null;
+          break; // success
+        } catch (err) {
+          if (err.name === 'AbortError') {
+            lastErr = err;
+            break;
+          }
+          lastErr = err;
+          console.warn('[Results] attempt failed for', url, err.message || err);
+          // try next url
+        }
+      }
+
+      if (lastErr && lastErr.name !== 'AbortError') {
+        console.error('Failed to load results:', lastErr);
+        toast.error(`Failed to load results: ${String(lastErr.message).split('\n')[0]}`);
+      }
+      setLoadingResults(false);
+    };
+
+    fetchResults();
+    return () => controller.abort();
+  }, []);
+
   return <DashboardLayout title="Result Management">
+      {loadingResults && <div className="mb-4 text-sm text-gray-600">Loading results...</div>}
       {/* Header with Add Result button */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">
           Student Results
         </h1>
         <div className="flex space-x-3">
-          <button type="button" onClick={() => setShowPublishModal(true)} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500" disabled={pendingResultsCount === 0}>
+          <button type="button" onClick={() => setShowPublishModal(true)} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500" disabled={pendingResultsCount === 0 || publishingAll}>
             <CheckIcon className="h-5 w-5 mr-2" />
-            Publish All Results ({pendingResultsCount})
+            {publishingAll ? 'Publishing...' : `Publish All Results (${pendingResultsCount})`}
           </button>
           <button type="button" onClick={handleToggleTeacherResults} className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${teacherResultsEnabled ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500`}>
             {teacherResultsEnabled ? <>
@@ -413,7 +444,8 @@ const ResultManagement = () => {
                 percentage,
                 grade
               } = calculateOverallGrade(result.subjects);
-              return <tr key={result.id}>
+              const isPublishing = publishingIds.includes(result.id);
+              return <tr key={String(result.id)}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
@@ -455,13 +487,13 @@ const ResultManagement = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button onClick={() => handleViewResult(result)} className="text-blue-600 hover:text-blue-900 mr-3">
+                      <button onClick={() => handleViewResult(result)} className="text-blue-600 hover:text-blue-900 mr-3" title="View result">
                         <EyeIcon className="h-5 w-5" />
                       </button>
-                      <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 mr-3">
+                      <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 mr-3" title="Add principal comment">
                         <MessageCircleIcon className="h-5 w-5" />
                       </button>
-                      {result.status === 'pending' && <button onClick={() => handlePublishResult(result.id)} className="text-green-600 hover:text-green-900">
+                      {result.status === 'pending' && <button onClick={() => handlePublishResult(result.id)} disabled={isPublishing} className="text-green-600 hover:text-green-900" title={isPublishing ? 'Publishing...' : 'Publish result'}>
                           <CheckIcon className="h-5 w-5" />
                         </button>}
                     </td>
@@ -521,76 +553,108 @@ const ResultManagement = () => {
       </div>
 
       {/* View Result Modal (replaced) */}
-      <Modal open={showViewModal && !!selectedResult} title="Result Card" onClose={() => setShowViewModal(false)}>
+      <Modal open={showViewModal && !!selectedResult} title="Result Review" onClose={() => setShowViewModal(false)}>
         {selectedResult && (
           <>
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <div className="text-sm text-gray-500">Student</div>
-                <div className="text-lg font-medium text-gray-900">{selectedResult.studentName}</div>
-                <div className="text-sm text-gray-500">{selectedResult.studentId}</div>
+            {/* Header: avatar + student meta */}
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="flex items-center gap-4">
+                <img src={selectedResult.picture || '/placeholder-avatar.png'} alt={selectedResult.studentName} className="h-16 w-16 rounded-full object-cover" />
+                <div>
+                  <div className="text-sm text-gray-500">Student</div>
+                  <div className="text-xl font-semibold text-gray-900">{selectedResult.studentName}</div>
+                  <div className="text-sm text-gray-500">ID: {selectedResult.studentId}</div>
+                  <div className="text-sm text-gray-500">{selectedResult.class}</div>
+                </div>
               </div>
               <div className="text-right">
-                <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${selectedResult.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                  {selectedResult.status === 'published' ? 'Published' : 'Pending'}
-                </span>
-              </div>
-            </div>
-
-            {/* Subjects table */}
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">1st Test</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">2nd Test</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd Test</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {selectedResult.subjects.map((subject, idx) => (
-                    <tr key={idx}>
-                      <td className="px-3 py-2 text-sm font-medium text-gray-900">{subject.name}</td>
-                      <td className="px-3 py-2 text-sm text-gray-500">{subject.firstTest}</td>
-                      <td className="px-3 py-2 text-sm text-gray-500">{subject.secondTest}</td>
-                      <td className="px-3 py-2 text-sm text-gray-500">{subject.thirdTest}</td>
-                      <td className="px-3 py-2 text-sm text-gray-500">{subject.exam}</td>
-                      <td className="px-3 py-2 text-sm text-gray-900">{subject.total}</td>
-                      <td className="px-3 py-2 text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${subject.grade === 'A+' || subject.grade === 'A' ? 'bg-green-100 text-green-800' : subject.grade === 'B' ? 'bg-blue-100 text-blue-800' : subject.grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                          {subject.grade}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Summary and actions */}
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <div className="text-sm text-gray-500">Overall Percentage</div>
-                <div className="text-lg font-medium text-gray-900">{calculateOverallGrade(selectedResult.subjects).percentage}%</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Overall Grade</div>
-                <div>
-                  <span className={`px-2 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${calculateOverallGrade(selectedResult.subjects).grade === 'A+' || calculateOverallGrade(selectedResult.subjects).grade === 'A' ? 'bg-green-100 text-green-800' : calculateOverallGrade(selectedResult.subjects).grade === 'B' ? 'bg-blue-100 text-blue-800' : calculateOverallGrade(selectedResult.subjects).grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                    {calculateOverallGrade(selectedResult.subjects).grade}
+                <div className="text-sm text-gray-500">Session / Term</div>
+                <div className="text-sm font-medium text-gray-900">{selectedResult.session} • {selectedResult.term}</div>
+                <div className="mt-2">
+                  <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${selectedResult.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                    {selectedResult.status === 'published' ? 'Published' : 'Pending'}
                   </span>
                 </div>
               </div>
-              <div className="flex items-end justify-end space-x-2">
+            </div>
+
+            {/* Subjects table (main card) */}
+            <div className="bg-white border rounded-md shadow-sm p-4 mb-4">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">1st Test</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">2nd Test</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd Test</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {selectedResult.subjects.map((subject, idx) => (
+                      <tr key={idx}>
+                        <td className="px-3 py-2 text-sm font-medium text-gray-900">{subject.name}</td>
+                        <td className="px-3 py-2 text-sm text-gray-500">{subject.firstTest ?? '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-500">{subject.secondTest ?? '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-500">{subject.thirdTest ?? '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-500">{subject.exam ?? '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900">{subject.total ?? '-'}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${subject.grade === 'A+' || subject.grade === 'A' ? 'bg-green-100 text-green-800' : subject.grade === 'B' ? 'bg-blue-100 text-blue-800' : subject.grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                            {subject.grade || '-'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Summary, actions */}
+            <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-4 mb-4">
+              <div className="flex gap-6">
+                <div>
+                  <div className="text-sm text-gray-500">Overall Percentage</div>
+                  <div className="text-lg font-medium text-gray-900">{calculateOverallGrade(selectedResult.subjects).percentage}%</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Overall Grade</div>
+                  <div>
+                    <span className={`px-2 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${calculateOverallGrade(selectedResult.subjects).grade === 'A+' || calculateOverallGrade(selectedResult.subjects).grade === 'A' ? 'bg-green-100 text-green-800' : calculateOverallGrade(selectedResult.subjects).grade === 'B' ? 'bg-blue-100 text-blue-800' : calculateOverallGrade(selectedResult.subjects).grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                      {calculateOverallGrade(selectedResult.subjects).grade}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
                 <button onClick={() => handleOpenCommentModal(selectedResult)} className="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-md text-sm">Add Principal Comment</button>
-                {selectedResult.status === 'pending' && <button onClick={() => { handlePublishResult(selectedResult.id); setShowViewModal(false); }} className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-md text-sm">Publish Result</button>}
+                {selectedResult.status === 'pending' && <button onClick={async () => { await handlePublishResult(selectedResult.id); setShowViewModal(false); }} className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-md text-sm">Publish Result</button>}
                 <button onClick={() => setShowViewModal(false)} className="inline-flex items-center px-3 py-2 bg-white border rounded-md text-sm">Close</button>
+              </div>
+            </div>
+
+            {/* Principal comment section */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium text-gray-700">Principal's comment</h4>
+                <span className={`text-xs font-medium ${selectedResult.principalComment ? 'text-green-700' : 'text-gray-500'}`}>
+                  {selectedResult.principalComment ? 'Added' : 'Not added'}
+                </span>
+              </div>
+              <div className="p-3 rounded border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-800 whitespace-pre-wrap min-h-[56px]">
+                {selectedResult.principalComment ? selectedResult.principalComment : <span className="text-gray-500">No principal comment yet.</span>}
+              </div>
+            </div>
+
+            {/* Teacher comment at bottom (standard result preview) */}
+            <div className="mt-4">
+              <div className="text-sm text-gray-600 mb-1">Teacher's comment</div>
+              <div className="p-3 rounded border border-gray-200 bg-white text-sm text-gray-800 whitespace-pre-wrap">
+                {selectedResult.teacherComment ? selectedResult.teacherComment : <span className="text-gray-500">No teacher comment provided.</span>}
               </div>
             </div>
           </>
@@ -659,10 +723,10 @@ const ResultManagement = () => {
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <button type="button" className="inline-flex justify-center rounded-md px-4 py-2 bg-green-600 text-white text-sm font-medium" onClick={handlePublishAllResults}>
-            Publish All
+          <button type="button" className="inline-flex justify-center rounded-md px-4 py-2 bg-green-600 text-white text-sm font-medium" onClick={handlePublishAllResults} disabled={publishingAll}>
+            {publishingAll ? 'Publishing...' : 'Publish All'}
           </button>
-          <button type="button" className="inline-flex justify-center rounded-md px-4 py-2 bg-white border text-sm font-medium" onClick={() => setShowPublishModal(false)}>
+          <button type="button" className="inline-flex justify-center rounded-md px-4 py-2 bg-white border text-sm font-medium" onClick={() => setShowPublishModal(false)} disabled={publishingAll}>
             Cancel
           </button>
         </div>

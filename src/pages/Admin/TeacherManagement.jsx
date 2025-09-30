@@ -5,10 +5,8 @@ import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Add API base (use Vite env variable if present)
-// const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
-const API_BASE = " https://yms-backend-a2x4.onrender.com";
-fetch(`${API_BASE}/api/students`);
-// =>  https://yms-backend-a2x4.onrender.com/api/students
+const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
+
 
 
 // Provide a userRecord object (use real auth/user data in production)
