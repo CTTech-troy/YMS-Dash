@@ -299,8 +299,8 @@ const ClassAssignment = () => {
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-10 w-10">
                           <img
-                            className="h-12 w-12 rounded-full object-cover" src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"}                            alt={teacher.name || 'avatar'}
-                            src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"}
+                            className="h-10 w-10 rounded-full object-cover"
+                            src={formatImageSrc(teacher.picture)}
                             alt={teacher.name || 'avatar'}
                             onError={(e) => { e.currentTarget.src = '/placeholder.png'; e.currentTarget.onerror = null; }}
                           />

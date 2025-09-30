@@ -397,75 +397,254 @@ const StudentManagement = () => {
         )}
       </div>
 
-      {/* Add Modal */}
+      {/* Add Modal - full detailed add student form */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
           <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => setShowAddModal(false)} />
           <div className="flex items-center justify-center min-h-screen p-4 text-center">
-            <div className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+            <div
+              className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-3xl w-full"
+              onClick={e => e.stopPropagation()}
+            >
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+
               <form onSubmit={handleSubmit}>
-                <div className="bg-white px-4 py-4 sm:p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
-                    <div className="flex items-center space-x-3 md:col-span-1">
+                <div className="bg-white px-4 py-4 sm:p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                    {/* Avatar + basic name */}
+                    <div className="md:col-span-1 flex items-start space-x-3">
                       <div onClick={handlePictureClick} className="h-20 w-20 rounded-full bg-blue-50 flex items-center justify-center cursor-pointer overflow-hidden">
-                        {formData.picture ? <img src={formData.picture} alt="profile" className="h-full w-full object-cover" /> : <PlusIcon className="h-5 w-5 text-blue-600" />}
+                        {formData.picture ? (
+                          <img src={formData.picture} alt="profile" className="h-full w-full object-cover" />
+                        ) : (
+                          <PlusIcon className="h-6 w-6 text-blue-600" />
+                        )}
                       </div>
-                      <div className="flex-1 text-left">
+                      <div className="flex-1">
                         <label className="block text-xs font-medium text-gray-700">Full Name</label>
-                        <input required name="name" value={formData.name} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs" />
+                        <input
+                          required
+                          name="name"
+                          value={formData.name}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        />
+                        <label className="block text-xs font-medium text-gray-700 mt-3">LIN Number</label>
+                        <input
+                          name="linNumber"
+                          value={formData.linNumber}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        />
                       </div>
                     </div>
 
-                    <div className="md:col-span-2 flex space-x-3">
-                      <div className="flex-1">
-                        <label className="block text-xs font-medium text-gray-700">LIN Number</label>
-                        <input name="linNumber" value={formData.linNumber} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs" />
-                      </div>
-                      <div className="w-40">
+                    {/* Class, DOB, gender */}
+                    <div className="md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div>
                         <label className="block text-xs font-medium text-gray-700">Class</label>
-                        <select name="class" required value={formData.class} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-xs">
+                        <select
+                          name="class"
+                          required
+                          value={formData.class}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        >
                           <option value="">Select</option>
                           <option>Creche</option>
-                          <option>KG 1</option>
-                          <option>KG 2</option>
                           <option>Nursery 1</option>
                           <option>Nursery 2</option>
+                          <option>KG 1</option>
+                          <option>KG 2</option>
                           <option>Primary 1</option>
                           <option>Primary 2</option>
                           <option>Primary 3</option>
+                          <option>Primary 4</option>
+                          <option>Primary 5</option>
+                          <option>JSS1</option>
+                          <option>JSS2</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700">Date of Birth</label>
+                        <input
+                          type="date"
+                          name="dob"
+                          value={formData.dob}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700">Gender</label>
+                        <select
+                          name="gender"
+                          value={formData.gender}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        >
+                          <option>Male</option>
+                          <option>Female</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700">Religion</label>
+                        <select
+                          name="religion"
+                          value={formData.religion}
+                          onChange={handleInputChange}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                        >
+                          <option value="">Select</option>
+                          <option value="Christian">Christian</option>
+                          <option value="Muslim">Muslim</option>
+                          <option value="Other">Other</option>
                         </select>
                       </div>
                     </div>
                   </div>
 
+                  {/* Address / state / lga */}
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <label className="text-xs text-gray-600">Date of Birth</label>
-                      <input type="date" name="dob" value={formData.dob} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
+                      <label className="text-xs text-gray-600">State of Origin</label>
+                      <input
+                        name="stateOfOrigin"
+                        value={formData.stateOfOrigin}
+                        onChange={handleInputChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                      />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-600">Gender</label>
-                      <select name="gender" value={formData.gender} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                        <option>Male</option>
-                        <option>Female</option>
-                      </select>
+                      <label className="text-xs text-gray-600">LGA</label>
+                      <input
+                        name="lga"
+                        value={formData.lga}
+                        onChange={handleInputChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                      />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-600">Religion</label>
-                      <select name="religion" value={formData.religion} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                        <option value="">Select</option>
-                        <option value="Christian">Christian</option>
-                        <option value="Muslim">Muslim</option>
-                        <option value="Other">Other</option>
-                      </select>
+                      <label className="text-xs text-gray-600">Address</label>
+                      <input
+                        name="address"
+                        value={formData.address}
+                        onChange={handleInputChange}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
+                      />
                     </div>
+                  </div>
+
+                  {/* Guardians */}
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold mb-2">Guardians</h4>
+                    <div className="space-y-2">
+                      {(formData.guardians || []).map((g, i) => (
+                        <div key={i} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                          <input
+                            placeholder="Name"
+                            value={g.name || ''}
+                            onChange={e => setFormData(prev => {
+                              const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+                              guardians[i] = { ...guardians[i], name: e.target.value };
+                              return { ...prev, guardians };
+                            })}
+                            className="border rounded px-2 py-1 text-sm"
+                          />
+                          <input
+                            placeholder="Phone"
+                            value={g.phone || ''}
+                            onChange={e => setFormData(prev => {
+                              const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+                              guardians[i] = { ...guardians[i], phone: e.target.value };
+                              return { ...prev, guardians };
+                            })}
+                            className="border rounded px-2 py-1 text-sm"
+                          />
+                          <input
+                            placeholder="Email"
+                            value={g.email || ''}
+                            onChange={e => setFormData(prev => {
+                              const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+                              guardians[i] = { ...guardians[i], email: e.target.value };
+                              return { ...prev, guardians };
+                            })}
+                            className="border rounded px-2 py-1 text-sm"
+                          />
+                          <div className="flex items-center space-x-2">
+                            <select
+                              value={g.relationship || 'Father'}
+                              onChange={e => setFormData(prev => {
+                                const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+                                guardians[i] = { ...guardians[i], relationship: e.target.value };
+                                return { ...prev, guardians };
+                              })}
+                              className="border rounded px-2 py-1 text-sm"
+                            >
+                              <option>Father</option>
+                              <option>Mother</option>
+                              <option>Guardian</option>
+                              <option>Other</option>
+                            </select>
+                            { (formData.guardians || []).length > 1 && (
+                              <button type="button" onClick={() => setFormData(prev => {
+                                const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
+                                guardians.splice(i,1);
+                                return { ...prev, guardians };
+                              })} className="text-xs text-red-600 hover:underline">Remove</button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {(formData.guardians || []).length < 3 && (
+                        <div>
+                          <button type="button" onClick={() => setFormData(prev => ({ ...prev, guardians: [...(prev.guardians || []), { name: '', phone: '', email: '', relationship: 'Father' }] }))} className="inline-flex items-center px-3 py-1 mt-2 rounded-md bg-blue-600 text-white text-sm">Add guardian</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Medical / Emergency */}
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs text-gray-600">Blood Group</label>
+                      <input name="bloodGroup" value={formData.bloodGroup} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Allergies</label>
+                      <input name="allergies" value={formData.allergies} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Medical Conditions</label>
+                      <input name="medicalConditions" value={formData.medicalConditions} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <label className="text-xs text-gray-600">Emergency Contact Name</label>
+                    <input name="emergencyContactName" value={formData.emergencyContactName} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
+                    <label className="text-xs text-gray-600 mt-2">Emergency Contact Phone</label>
+                    <input name="emergencyContactPhone" value={formData.emergencyContactPhone} onChange={handleInputChange} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
+                  </div>
+
+                  {/* Subjects (simple comma-separated) */}
+                  <div className="mt-4">
+                    <label className="text-xs text-gray-600">Subjects (comma separated)</label>
+                    <input name="subjects" value={(formData.subjects || []).join?.(',') || formData.subjects || ''} onChange={e => setFormData(prev => ({ ...prev, subjects: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
                   </div>
                 </div>
 
                 <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                   <button type="submit" disabled={isAdding} className={`w-full inline-flex items-center justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm ${isAdding ? 'opacity-80 cursor-not-allowed' : ''}`}>
-                    {isAdding ? <> <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle></svg> Adding...</> : 'Add Student'}
+                    {isAdding ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle></svg>
+                        Adding...
+                      </>
+                    ) : 'Add Student'}
                   </button>
                   <button type="button" onClick={() => setShowAddModal(false)} className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 px-4 py-2 bg-white text-base text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
                 </div>
@@ -498,7 +677,11 @@ const StudentManagement = () => {
                     </div>
                     <div className="flex-1 text-left">
                       {isEditing ? (
-                        <input value={editableStudent.name || ''} onChange={e => setEditableStudent(prev => ({ ...prev, name: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" />
+                        <input
+                          value={editableStudent.name || ''}
+                          onChange={e => setEditableStudent(prev => ({ ...prev, name: e.target.value }))}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1"
+                        />
                       ) : (
                         <>
                           <div className="text-lg font-medium text-gray-900">{editableStudent.name || 'No name'}</div>
@@ -510,12 +693,23 @@ const StudentManagement = () => {
 
                   <div className="md:col-span-2 flex space-x-3">
                     <div className="flex-1">
-                      {isEditing ? <input value={editableStudent.linNumber || ''} onChange={e => setEditableStudent(prev => ({ ...prev, linNumber: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1" /> : <div className="mt-1 text-sm text-gray-700">{editableStudent.linNumber || '—'}</div>}
+                      {isEditing ? <input
+                        value={editableStudent.linNumber || ''}
+                        onChange={e => setEditableStudent(prev => ({ ...prev, linNumber: e.target.value }))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1"
+                      /> : <div className="mt-1 text-sm text-gray-700">{editableStudent.linNumber || '—'}</div>}
                     </div>
                     <div className="w-40">
                       {isEditing ? (
-                        <select value={editableStudent.class || ''} onChange={e => setEditableStudent(prev => ({ ...prev, class: e.target.value }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1">
-                          <option value="">Select</option><option>Creche</option><option>KG 1</option><option>KG 2</option>
+                        <select
+                          value={editableStudent.class || ''}
+                          onChange={e => setEditableStudent(prev => ({ ...prev, class: e.target.value }))}
+                          className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1"
+                        >
+                          <option value="">Select</option>
+                          <option>Creche</option>
+                          <option>KG 1</option>
+                          <option>KG 2</option>
                         </select>
                       ) : <div className="mt-1 text-sm text-gray-700">{editableStudent.class || '—'}</div>}
                     </div>
