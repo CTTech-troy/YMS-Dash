@@ -1,7 +1,8 @@
 // src/pages/Admin/StudentManagement.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
 import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, DownloadCloud } from 'lucide-react';
+import { ArrowUpCircle } from "lucide-react";
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -258,9 +259,19 @@ const StudentManagement = () => {
     }
   };
 
-  // Filtering
+  // Filtering + alphabetical sort
   const q = (searchQuery || '').trim().toLowerCase();
-  const filteredStudents = q ? students.filter(s => {
+
+  // keep students sorted alphabetically by name for all displays
+  const sortedStudents = useMemo(() => {
+    return [...students].sort((a, b) => {
+      const na = (a?.name || '').toString().toLowerCase();
+      const nb = (b?.name || '').toString().toLowerCase();
+      return na.localeCompare(nb);
+    });
+  }, [students]);
+
+  const filteredStudents = q ? sortedStudents.filter(s => {
     const fields = [
       s.name, s.uid, s.linNumber, s.class,
       (s.guardians && s.guardians[0] && s.guardians[0].name) || '',
@@ -268,7 +279,21 @@ const StudentManagement = () => {
       (s.guardians && s.guardians[0] && s.guardians[0].email) || ''
     ].map(v => (v || '').toString().toLowerCase());
     return fields.some(f => f.includes(q));
-  }) : students;
+  }) : sortedStudents;
+
+  // Pagination state and helpers
+  const [currentPage, setCurrentPage] = useState(1);
+  // fixed rows per page (10)
+  const [pageSize] = useState(10);
+
+  // reset page when filters or data change
+  useEffect(() => { setCurrentPage(1); }, [searchQuery, students]);
+
+  const totalItems = filteredStudents.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const startIndex = Math.min(totalItems, (currentPage - 1) * pageSize);
+  const endIndex = Math.min(totalItems, startIndex + pageSize);
+  const displayedStudents = filteredStudents.slice(startIndex, endIndex);
 
   // Helper for editing guardian fields in editableStudent
   const editGuardianChange = (idx, field, value) => {
@@ -289,13 +314,7 @@ const StudentManagement = () => {
   };
 
   // Helper for adding a guardian in editableStudent
-  const addEditableGuardian = () => {
-    setEditableStudent(prev => {
-      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
-      guardians.push({ name: '', phone: '', email: '', relationship: 'Father' });
-      return { ...prev, guardians };
-    });
-  };
+  // (removed unused addEditableGuardian function)
 
   // Add this handler near other handlers (e.g. after handleDownloadPdf)
   const handlePromoteAll = async () => {
@@ -318,7 +337,7 @@ const StudentManagement = () => {
 
   return (
     <DashboardLayout title="Student Management">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-2" id='mainbash'>
         <h1 className="text-lg font-semibold text-gray-900">Students</h1>
         <div className="flex items-center space-x-3">
           <button type="button" onClick={() => { setFormData(emptyForm); setShowAddModal(true); }} className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
@@ -328,73 +347,187 @@ const StudentManagement = () => {
           <button type="button" onClick={handleDownloadPdf} disabled={students.length === 0} className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:opacity-60">
             <DownloadCloud className="h-5 w-5 mr-2" /> Export PDF
           </button>
-
-          {/* Promote All */}
-          <button type="button" onClick={handlePromoteAll} disabled={students.length === 0} className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-60">
-            Promote All
-          </button>
         </div>
       </div>
 
-      <div className="bg-white shadow rounded-lg p-4 mb-6">
-        <div className="w-full sm:w-96">
-          <label htmlFor="search" className="sr-only">Search</label>
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
-            </div>
-            <input id="search" name="search" className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 text-sm" placeholder="Search by name, ID or email" type="search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-          </div>
-        </div>
+      <div className="bg-white shadow rounded-lg p-5 mb-6">
+  <div className="w-full flex items-center justify-between gap-3">
+    {/* Search box */}
+    <div className="relative flex-1 max-w-sm">
+      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        <svg
+          className="h-5 w-5 text-gray-400"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fillRule="evenodd"
+            d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 
+              3.476l4.817 4.817a1 1 0 01-1.414 
+              1.414l-4.816-4.816A6 6 0 012 8z"
+            clipRule="evenodd"
+          />
+        </svg>
       </div>
+      <input
+        id="search"
+        name="search"
+        type="search"
+        placeholder="Search by name, ID or email"
+        value={searchQuery}
+        onChange={e => setSearchQuery(e.target.value)}
+        className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 text-sm"
+      />
+    </div>
 
-      <div className="flex flex-col">
+    {/* Promote All */}
+   <button
+  type="button"
+  onClick={handlePromoteAll}
+  disabled={students.length === 0}
+  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-60"
+>
+  <ArrowUpCircle className="w-4 h-4" />
+  Promote All
+</button>
+  </div>
+</div>
+
+      <div className="flex flex-col mb-10"> {/* increased bottom margin so fixed pagination doesn't never cover content */}
         {isLoading ? (
           <div className="py-12 flex items-center justify-center"><div className="text-gray-600 font-medium">Loading…</div></div>
         ) : (
-          <div className="-my-2 overflow-x-auto">
-            <div className="py-2 inline-block min-w-full sm:px-6 lg:px-8">
-              <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Student</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">UID</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Class</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Guardian</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredStudents.length === 0 ? (
-                      <tr><td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">{students.length === 0 ? 'No students found.' : 'No students match your search.'}</td></tr>
-                    ) : filteredStudents.map((student, idx) => (
-                      <tr key={student.id || student.uid || idx}>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0 h-8 w-8"><img className="h-8 w-8 rounded-full object-cover" src={student.picture || '/placeholder.png'} alt="" /></div>
-                            <div className="ml-3">
-                              <div className="text-xs font-medium text-gray-900 truncate">{student.name}</div>
-                              <div className="text-xs text-gray-500 truncate">{student.dob} | {student.gender} | {student.age ? `${student.age} yrs` : '—'}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap"><div className="text-xs text-gray-900 truncate">{student.uid || generateStudentId()}</div></td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 truncate">{student.class}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 truncate">{(student.guardians && student.guardians[0]) ? `${student.guardians[0].name} (${student.guardians[0].relationship})` : '—'}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
-                          <button onClick={() => handleViewStudent(student)} className="text-blue-600 hover:text-blue-900 mr-3"><EyeIcon className="h-5 w-5" /></button>
-                          <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="text-indigo-600 hover:text-indigo-900 mr-3"><PencilIcon className="h-5 w-5" /></button>
-                          <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="-my-5 overflow-x-auto pb-1">
+            <div className="py-2">
+              {/* table container - wider and centered */}
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+                {/* Mobile: stacked cards */}
+                <div className="space-y-4 md:hidden">
+                  {displayedStudents.length === 0 ? (
+                    <div className="bg-white shadow rounded-lg p-4 text-center text-sm text-gray-500">
+                      {students.length === 0 ? 'No students found.' : 'No students match your search.'}
+                    </div>
+                  ) : displayedStudents.map((student, idx) => (
+                    <div key={student.id || student.uid || idx} className="bg-white shadow rounded-lg p-4 flex items-start justify-between">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <img
+                          className="h-12 w-12 rounded-full object-cover flex-shrink-0"
+                          src={
+                            student.picture ||
+                            `https://source.unsplash.com/random/300x300?sig=${encodeURIComponent(student.uid || student.id || idx)}`
+                          }
+                          alt=""
+                        />
+                       <div className="min-w-0">
+                         <div className="text-sm font-semibold text-gray-900 truncate">{student.name}</div>
+                         <div className="text-xs text-gray-500 truncate">{student.uid || generateStudentId()}</div>
+                         <div className="text-xs text-gray-500 truncate">{student.class} · {student.linNumber || '—'}</div>
+                       </div>
+                     </div>
+                     <div className="flex items-center ml-3 space-x-2">
+                       <button onClick={() => handleViewStudent(student)} className="p-2 text-blue-600 hover:text-blue-900"><EyeIcon className="h-5 w-5" /></button>
+                       <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="p-2 text-indigo-600 hover:text-indigo-900"><PencilIcon className="h-5 w-5" /></button>
+                       <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="p-2 text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
+                     </div>
+                   </div>
+                  ))}
+                </div>
+
+                {/* Desktop / Tablet: table */}
+                <div className="hidden md:block">
+                  <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200 table-auto">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Student</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">UID</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Class</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">LIN Number</th>
+                          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700 uppercase tracking-wide">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {displayedStudents.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">
+                              {students.length === 0 ? 'No students found.' : 'No students match your search.'}
+                            </td>
+                          </tr>
+                        ) : displayedStudents.map((student, idx) => (
+                          <tr key={student.id || student.uid || idx}>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <div className="flex-shrink-0 h-10 w-10">
+                                  <img
+                                    className="h-10 w-10 rounded-full object-cover"
+                                    src={student.picture || `https://source.unsplash.com/random/300x300?sig=${encodeURIComponent(student.uid || student.id || idx)}`}
+                                    alt=""
+                                  />
+                                </div>
+                                <div className="ml-4 min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 truncate">{student.name}</div>
+                                  <div className="text-xs text-gray-500 truncate">{student.dob} · {student.gender} · {student.age ? `${student.age} yrs` : '—'}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 truncate">{student.uid || generateStudentId()}</div></td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate">{student.class}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate">{student.linNumber || '—'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                              <button onClick={() => handleViewStudent(student)} className="text-blue-600 hover:text-blue-900 mr-3"><EyeIcon className="h-5 w-5" /></button>
+                              <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="text-indigo-600 hover:text-indigo-900 mr-3"><PencilIcon className="h-5 w-5" /></button>
+                              <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
               </div>
             </div>
           </div>
-        )}
+         )}
+       </div>
+
+      {/* Fixed Pagination at bottom (always shows 10 rows per page)
+          Adjusted to avoid overlapping with a left sidebar.
+          On medium/large screens the left offset matches common sidebar widths (md:left-64, lg:left-72).
+          Also constrained with a centered max width so it sits inside the main content area. */}
+      <div className="fixed bottom-4 left-4 right-4 md:left-64 lg:left-72 z-30 pointer-events-none mt-10">
+        <div className="mx-auto max-w-7xl px-6 pointer-events-auto">
+          <div className="bg-white shadow-md rounded-lg px-4 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-700 mb-2 sm:mb-0">
+              Showing {totalItems === 0 ? 0 : startIndex + 1} to {startIndex + displayedStudents.length}
+              
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 text-sm border rounded-md bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                Prev
+              </button>
+
+              <div className="px-3 text-sm font-medium text-gray-700">Page {currentPage} / {totalPages}</div>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 text-sm border rounded-md bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Add Modal - full detailed add student form */}
@@ -460,9 +593,11 @@ const StudentManagement = () => {
                           <option>Primary 2</option>
                           <option>Primary 3</option>
                           <option>Primary 4</option>
-                          <option>Primary 5</option>
+                          <option>Primary 6</option>
                           <option>JSS1</option>
                           <option>JSS2</option>
+                          <option>Graduate</option>
+                          <option>Left</option>
                         </select>
                       </div>
 
@@ -485,8 +620,9 @@ const StudentManagement = () => {
                           onChange={handleInputChange}
                           className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm"
                         >
-                          <option>Male</option>
-                          <option>Female</option>
+                        <option value="">Select</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
                         </select>
                       </div>
 
@@ -631,10 +767,6 @@ const StudentManagement = () => {
                   </div>
 
                   {/* Subjects (simple comma-separated) */}
-                  <div className="mt-4">
-                    <label className="text-xs text-gray-600">Subjects (comma separated)</label>
-                    <input name="subjects" value={(formData.subjects || []).join?.(',') || formData.subjects || ''} onChange={e => setFormData(prev => ({ ...prev, subjects: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm" />
-                  </div>
                 </div>
 
                 <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
@@ -708,8 +840,19 @@ const StudentManagement = () => {
                         >
                           <option value="">Select</option>
                           <option>Creche</option>
+                          <option>Nursery 1</option>
+                          <option>Nursery 2</option>
                           <option>KG 1</option>
                           <option>KG 2</option>
+                          <option>Primary 1</option>
+                          <option>Primary 2</option>
+                          <option>Primary 3</option>
+                          <option>Primary 4</option>
+                          <option>Primary 6</option>
+                          <option>JSS1</option>
+                          <option>JSS2</option>
+                          <option>Graduate</option>
+                          <option>Left</option>
                         </select>
                       ) : <div className="mt-1 text-sm text-gray-700">{editableStudent.class || '—'}</div>}
                     </div>
@@ -802,18 +945,15 @@ const StudentManagement = () => {
                             <div>{g.name || '—'} {g.relationship ? `(${g.relationship})` : ''} — {g.phone || ''} {g.email ? `| ${g.email}` : ''}</div>
                           )}
                           {isEditing && (editableStudent.guardians || []).length > 1 && (
-                            <div className="mt-1"><button type="button" onClick={() => removeEditableGuardian(i)} className="text-xs text-red-600 hover:underline">Remove</button></div>
+                            <div className="mt-1">
+                              <button type="button" onClick={() => removeEditableGuardian(i)} className="text-xs text-red-600 hover:underline">Remove</button>
+                            </div>
                           )}
                         </div>
                       ))}
-                      {isEditing && (editableStudent.guardians || []).length < 3 && (
-                        <div>
-                          <button type="button" onClick={addEditableGuardian} className="inline-flex items-center px-3 py-1 border border-transparent rounded-md shadow-sm text-sm text-white bg-blue-600 hover:bg-blue-700">Add guardian</button>
-                        </div>
-                      )}
+
                     </div>
                   </div>
-
                   {/* Medical */}
                   <div className="col-span-1 p-3 rounded-md">
                     <h4 className="text-sm font-semibold mb-2">Medical / Emergency</h4>

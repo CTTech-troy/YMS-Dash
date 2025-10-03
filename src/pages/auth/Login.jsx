@@ -69,21 +69,75 @@ const Login = () => {
           toast.error(res?.message || "Login failed");
         }
       } else {
-        if (typeof studentLogin !== "function") {
-          toast.error("Authentication service not available.");
-          return;
-        }
-        const res = await studentLogin(formData.studentId, formData.pin);
-        if (res?.success) {
-          toast.success(`Welcome ${res.user.name}`);
-          // show sweetalert for student results coming soon
-          if (Swal && typeof Swal.fire === "function") {
-            Swal.fire({ title: "Result coming soon", icon: "info" });
-          } else {
-            alert("Result coming soon");
+        // Student flow:
+        // 1) verify student exists
+        // 2) verify scratchcard pin and unused
+        // 3) mark scratchcard used by studentId
+        // 4) redirect to student dashboard
+        try {
+          // 1) check student exists
+          const studentResp = await fetch(`/api/students/${encodeURIComponent(formData.studentId)}`);
+          if (!studentResp.ok) {
+            const errBody = await studentResp.json().catch(() => ({}));
+            toast.error(errBody.message || "Student not found");
+            return;
           }
-        } else {
-          toast.error(res?.message || "Login failed");
+          const studentData = await studentResp.json();
+
+          // 2) verify scratchcard pin
+          const verifyResp = await fetch(`/api/scratchcards/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin: formData.pin }),
+          });
+
+          if (!verifyResp.ok) {
+            const errBody = await verifyResp.json().catch(() => ({}));
+            toast.error(errBody.message || "Invalid PIN");
+            return;
+          }
+
+          const verifyData = await verifyResp.json();
+          // expect verifyData = { valid: true, used: false, id: 'cardId', ... }
+          if (!verifyData.valid) {
+            toast.error("Invalid PIN");
+            return;
+          }
+          if (verifyData.used) {
+            toast.error("This PIN has already been used");
+            return;
+          }
+
+          // 3) mark scratchcard used by this student
+          const useResp = await fetch(`/api/scratchcards/${encodeURIComponent(verifyData.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ used: true, usedBy: formData.studentId, usedAt: new Date().toISOString() }),
+          });
+
+          if (!useResp.ok) {
+            const errBody = await useResp.json().catch(() => ({}));
+            toast.error(errBody.message || "Failed to mark PIN as used");
+            return;
+          }
+
+          // optional: call backend to create a student session if you have studentLogin
+          if (typeof studentLogin === "function") {
+            await studentLogin(formData.studentId); // context-based login (optional)
+          } else {
+            // fallback toast
+            toast.success(`Welcome ${studentData.name || formData.studentId}`);
+          }
+
+          // 4) show info and redirect to dashboard
+          if (Swal && typeof Swal.fire === "function") {
+            await Swal.fire({ title: "Access granted", text: "Redirecting to your dashboard...", icon: "success", timer: 1500, showConfirmButton: false });
+          } else {
+            toast.success("Access granted. Redirecting...");
+          }
+          window.location.href = "/student"; // or "/student/dashboard"
+        } catch (innerErr) {
+          toast.error(innerErr?.message || "Student login failed");
         }
       }
     } catch (err) {
@@ -166,7 +220,7 @@ const Login = () => {
 
                   <div>
                     <label htmlFor="pin" className="block text-sm font-medium text-gray-700 mb-1">
-                      PIN
+                      Scratch Card PIN
                     </label>
                     <div className="relative">
                       <input
