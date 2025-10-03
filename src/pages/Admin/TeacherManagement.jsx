@@ -557,13 +557,28 @@ const TeacherManagement = () => {
               {filteredTeachers.map(teacher => (
                 <tr key={teacher.id}>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10 sm:h-12 sm:w-12">
-                        <img className="h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover" src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"} alt="" />
+                    <div className="relative flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10 sm:h-12 sm:w-12 relative">
+                        <img
+                          className="h-10 w-10 sm:h-12 sm:w-12 rounded-full object-cover"
+                          src={teacher.picture ? (teacher.picture.startsWith('data:') ? teacher.picture : `data:image/jpeg;base64,${teacher.picture}`) : "/placeholder.png"}
+                          alt=""
+                        />
+                        {/* Status dot */}
+                        <span
+                          className={`absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white ${teacher.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`}
+                          title={teacher.status === 'active' ? 'Online' : 'Offline'}
+                        />
                       </div>
                       <div className="ml-3">
                         <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
                         <div className="text-sm text-gray-500">{teacher.uid}</div>
+                        {/* Show timestamp if online */}
+                        {teacher.status === 'active' && teacher.lastLogin && (
+                          <div className="text-xs text-green-600 mt-1">
+                            Logged in: {new Date(teacher.lastLogin).toLocaleString()}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>

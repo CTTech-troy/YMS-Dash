@@ -130,51 +130,6 @@ const TeacherDashboard = () => {
   }, [teacherProfile]);
 
   useEffect(() => {
-    const normalize = (data) => {
-      const rawPicture = data.picture ?? data.profilePicture ?? '';
-      const pictureSrc = rawPicture
-        ? (typeof rawPicture === 'string' && rawPicture.startsWith('data:')
-            ? rawPicture
-            : `data:image/jpeg;base64,${rawPicture}`)
-        : '/images/default-avatar.png';
-
-      // determine subjects as array and joined string, and subject count
-      const subjectsArray = Array.isArray(data.subjects)
-        ? data.subjects
-        : (typeof data.subjects === 'string' && data.subjects.trim())
-          ? data.subjects.split(',').map(s => s.trim()).filter(Boolean)
-          : (typeof data.subject === 'string' && data.subject.trim())
-            ? data.subject.split(',').map(s => s.trim()).filter(Boolean)
-            : [];
-      const subjects = subjectsArray.join(', ');
-
-      // determine students count: direct fields, nested assignedClass object, or students array filtered by class
-      const studentsCount = data.studentsCount
-        ?? data.classStudentCount
-        ?? (Array.isArray(data.students)
-            ? data.students.filter(s =>
-                classMatches(s.class || s.className || s.assignedClass || s.klass || s.grade,
-                  (typeof data.assignedClass === 'string' ? data.assignedClass : (data.assignedClass?.name || '')))
-              ).length
-            : (typeof data.assignedClass === 'object' ? (data.assignedClass.students?.length ?? data.assignedClass.studentCount) : undefined)
-        );
-
-      return {
-        id: data.id ?? data._id ?? null,
-        name: data.fullName ?? data.name ?? '',
-        uid: data.uid ?? data.staffId ?? '',
-        email: data.email ?? '',
-        phone: data.phone ?? '',
-        subject: subjects,
-        subjectsCount: subjectsArray.length,
-        assignedClass: (typeof data.assignedClass === 'string' ? data.assignedClass : (data.assignedClassName ?? (data.assignedClass?.name ?? ''))),
-        studentsCount: studentsCount,
-        pictureSrc,
-        mustChangePassword: !!data.mustChangePassword,
-        raw: data
-      };
-    };
-
     const fetchProfile = async () => {
       if (!currentUser || userRole !== 'teacher') return;
       setProfileLoading(true);
@@ -201,6 +156,56 @@ const TeacherDashboard = () => {
           setTeacherProfile(null);
           console.warn('Teacher profile not found for uid:', currentUser.uid);
         } else {
+          const normalize = (data) => {
+            if (!data) {
+              // Return a safe default object if data is null
+              return {
+                id: null,
+                name: '',
+                uid: '',
+                email: '',
+                phone: '',
+                subject: '',
+                subjectsCount: 0,
+                assignedClass: '',
+                studentsCount: 0,
+                pictureSrc: '/images/default-avatar.png',
+                mustChangePassword: false,
+                raw: {}
+              };
+            }
+
+            // If students is missing, treat as empty array
+            const studentsArr = Array.isArray(data.students) ? data.students : [];
+            const subjectsArr = Array.isArray(data.subjects)
+              ? data.subjects
+              : (typeof data.subject === 'string' && data.subject.trim())
+                ? data.subject.split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+
+            const rawPicture = data.picture ?? data.profilePicture ?? '';
+            const pictureSrc = rawPicture
+              ? (typeof rawPicture === 'string' && rawPicture.startsWith('data:')
+                  ? rawPicture
+                  : `data:image/jpeg;base64,${rawPicture}`)
+              : '/images/default-avatar.png';
+
+            return {
+              id: data.id ?? data._id ?? null,
+              name: data.fullName ?? data.name ?? '',
+              uid: data.uid ?? data.staffId ?? '',
+              email: data.email ?? '',
+              phone: data.phone ?? '',
+              subject: subjectsArr.join(', '),
+              subjectsCount: subjectsArr.length,
+              assignedClass: (typeof data.assignedClass === 'string' ? data.assignedClass : (data.assignedClassName ?? (data.assignedClass?.name ?? ''))),
+              studentsCount: data.studentsCount ?? studentsArr.length,
+              pictureSrc,
+              mustChangePassword: !!data.mustChangePassword,
+              raw: data
+            };
+          };
+
           setTeacherProfile(normalize(data));
         }
       } catch (err) {

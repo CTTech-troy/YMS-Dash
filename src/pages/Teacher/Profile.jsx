@@ -44,7 +44,14 @@ const TeacherProfile = () => {
 
   useEffect(() => {
     const normalize = (data) => {
-      const picture = data.picture ?? data.profilePicture ?? data.pictureSrc ?? "";
+      if (!data) return {};
+      const rawPicture = data.picture ?? data.profilePicture ?? data.pictureSrc ?? "";
+      const pictureSrc = rawPicture
+        ? (typeof rawPicture === "string" && rawPicture.startsWith("data:")
+            ? rawPicture
+            : `data:image/jpeg;base64,${rawPicture}`)
+        : "/images/default-avatar.png";
+
       return {
         name: data.fullName ?? data.name ?? "",
         email: data.email ?? "",
@@ -60,7 +67,7 @@ const TeacherProfile = () => {
         relationship: data.relationship ?? "",
         assignedClass: data.assignedClass ?? data.assignedClassName ?? "",
         uid: data.uid ?? data.staffId ?? "",
-        pictureSrc: picture,
+        pictureSrc,
       };
     };
 
@@ -116,6 +123,7 @@ const TeacherProfile = () => {
     setFormData((p) => ({ ...p, [name]: val }));
   };
 
+  
   const handlePictureChange = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -186,77 +194,42 @@ const TeacherProfile = () => {
   };
 
   const handleChangePassword = async (e) => {
-    e?.preventDefault();
-    if (!teacherId) {
-      toast.error("Missing teacher id");
-      return;
-    }
-    if (!pwdForm.oldPassword || !pwdForm.newPassword) {
-      toast.error("Enter both old and new password");
-      return;
-    }
-    if (pwdForm.newPassword !== pwdForm.confirmPassword) {
-      toast.error("New password and confirm password do not match");
-      return;
-    }
-    if (pwdForm.newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters");
-      return;
-    }
+    e.preventDefault();
     setLoading(true);
-    try {
-      // Step 1: Change password through auth route
-      const res = await fetch(`${API_BASE}/api/auth/change-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid: formData.uid || currentUser?.uid,
-          oldPassword: pwdForm.oldPassword,
-          newPassword: pwdForm.newPassword,
-        }),
-      });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.message || "Failed to change password");
+    try {
+      // Validate passwords match, etc.
+      if (!pwdForm.newPassword || pwdForm.newPassword !== pwdForm.confirmPassword) {
+        // handle error
+        setLoading(false);
         return;
       }
 
-      // Step 2: Update teacher profile with new "initialPassword"
-      try {
-        const putRes = await fetch(`${API_BASE}/api/teachers/${encodeURIComponent(teacherId)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ initialPassword: pwdForm.newPassword }),
-        });
+      // Update password via teacher update endpoint
+      const res = await fetch(`${API_BASE}/api/teachers/${teacherId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initPassword: pwdForm.newPassword }),
+      });
 
-        if (putRes.ok) {
-          const updated = await putRes.json().catch(() => ({}));
-          // merge returned update into form state if present
-          const merged = { ...formData, ...(updated || {}) };
-          setFormData(merged);
-          setOriginalData(merged);
-        } else {
-          // non-critical: backend didn't accept initialPassword update
-          const err = await putRes.json().catch(() => ({}));
-          console.warn("Failed to update teacher initialPassword:", err);
-        }
-      } catch (err) {
-        console.error("Failed to PUT initialPassword", err);
+      if (res.ok) {
+        // Optionally update local state
+        setFormData(prev => ({ ...prev, password: pwdForm.newPassword }));
+        setShowChangePwd(false);
+        // Show success message
+      } else {
+        // Handle error
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to update password");
       }
-
-      toast.success("Password changed successfully");
-      setShowChangePwd(false);
-      setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
     } catch (err) {
-      console.error("change pwd error", err);
-      toast.error("Failed to change password");
+      alert("Error updating password");
     } finally {
       setLoading(false);
     }
   };
 
-  return (
+    return (
     <DashboardLayout
       title="My Profile"
       userProfile={{ name: formData.name, email: formData.email, pictureSrc: avatarPreview || formData.pictureSrc }}
@@ -332,7 +305,10 @@ const TeacherProfile = () => {
                         <img src={avatarPreview} alt="avatar" className="h-full w-full object-cover" />
                       ) : formData.pictureSrc ? (
                         <img
-                        src={ formData.pictureSrc ? formData.pictureSrc.startsWith("data:") ? formData.pictureSrc : `data:image/jpeg;base64,${formData.pictureSrc}` : "/images/default-avatar.png"}alt="avatar"className="h-full w-full object-cover"/>
+  src={avatarPreview || formData.pictureSrc || "/images/default-avatar.png"}
+  alt="avatar"
+  className="h-full w-full object-cover"
+/>
                       ) : (
                         <div className="flex items-center justify-center h-full w-full text-gray-400">
                           <UserIcon />
@@ -434,14 +410,8 @@ const TeacherProfile = () => {
                 <div>
                   <div className="h-24 w-24 rounded-full overflow-hidden bg-gray-100">
                     {formData.pictureSrc ? (
-<img
-  src={
-    formData.pictureSrc
-      ? formData.pictureSrc.startsWith("data:")
-        ? formData.pictureSrc // already a full data URL
-        : `data:image/jpeg;base64,${formData.pictureSrc}` // raw base64 from backend
-      : "/images/default-avatar.png" // fallback
-  }
+                      <img
+  src={avatarPreview || formData.pictureSrc || "/images/default-avatar.png"}
   alt="avatar"
   className="h-full w-full object-cover"
 />
