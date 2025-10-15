@@ -19,16 +19,20 @@ const TeacherClasses = () => {
   const [activeTab, setActiveTab] = useState('students');
   // Students will be loaded from the backend; start with an empty list
   const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(true);
   // teacher assigned class (used to restrict Add Subject class)
   const [assignedClass, setAssignedClass] = useState(null);
+  // admin/principal mode flag — when true display everything (no class filtering)
+  const [isAdminView, setIsAdminView] = useState(false);
+  // results state (for admin view or per-class/per-teacher)
+  const [results, setResults] = useState([]);
+  const [resultsLoading, setResultsLoading] = useState(true);
   const auth = useAuth();
   const currentUser = auth?.currentUser || auth?.user || null;
   const staffIdFromAuth = currentUser?.uid || currentUser?.id || localStorage.getItem('uid') || null;
   const staffNameFromAuth = currentUser?.displayName || currentUser?.name || localStorage.getItem('name') || null;
 
-  // Vite env — set VITE_API_URL in frontend/.env (example: VITE_API_URL=https://yms-backend-xqo8.onrender.com)
   const API_BASE = (import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com').replace(/\/$/, '');
-  // backend mounts subjects router at /api/subjects (see backend/src/index.js)
   const SUBJECTS_BASE = `${API_BASE}/api/subjects`;
   // students & teachers endpoints
   const STUDENTS_BASE = `${API_BASE}/api/students`;
@@ -57,10 +61,17 @@ const TeacherClasses = () => {
 
   useEffect(() => {
     const loadStudentsForTeacher = async () => {
+      setStudentsLoading(true);
       // try to determine teacher UID and assigned class
       const uid = staffIdFromAuth || localStorage.getItem('uid');
       let assignedClass = currentUser?.assignedClass || localStorage.getItem('assignedClass') || null;
-      setAssignedClass(assignedClass);
+      // normalize and detect admin/principal view (local var)
+      const acLower = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
+      const adminInitial = acLower === 'admin' || acLower === 'principal' || acLower === 'headmaster' || acLower === 'head';
+      // store normalized assignedClass for consistent matching/display
+      const normalizedAssignedClass = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
+      setAssignedClass(normalizedAssignedClass);
+      setIsAdminView(!!adminInitial);
 
       if (uid) {
         try {
@@ -73,17 +84,39 @@ const TeacherClasses = () => {
             const tData = await tRes.json();
             const teacher = Array.isArray(tData) ? tData[0] : tData;
             assignedClass = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClass || currentUser?.assignedClass;
-            setAssignedClass(assignedClass);
+            // derive adminMode locally from the possibly-updated assignedClass
+            const acLower2 = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
+            const adminFromTeacher = acLower2 === 'admin' || acLower2 === 'principal' || acLower2 === 'headmaster' || acLower2 === 'head';
+            // normalize and persist assignedClass
+            const normalizedAssigned = acLower2;
+            setAssignedClass(normalizedAssigned);
+            setIsAdminView(!!adminFromTeacher);
           }
         } catch (err) {
           console.error('Failed to fetch teacher assignment', err);
         }
       }
 
+      // derive adminMode for this run (use latest assignedClass value)
+      const adminMode = (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'admin'
+        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'principal'
+        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'headmaster'
+        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'head';
+
       // Try server-side class filter when we have an assignedClass to reduce payload
       try {
         let studentsData = [];
-        if (assignedClass) {
+        // If admin/principal view requested, fetch all students (don't attempt per-class queries)
+        if (adminMode) {
+          const sAllRes = await fetch(`${STUDENTS_BASE}`);
+          if (!sAllRes.ok) {
+            const body = await sAllRes.text().catch(() => null);
+            console.error('Students fetch failed', { url: `${STUDENTS_BASE}`, status: sAllRes.status, body });
+            throw new Error('Students fetch failed');
+          }
+          const raw = await sAllRes.json().catch(() => []);
+          studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
+        } else if (assignedClass) {
           const enc = encodeURIComponent(assignedClass);
           // Try primary query param name "class"
           const tryUrls = [
@@ -93,16 +126,11 @@ const TeacherClasses = () => {
           ];
 
           let sRes = null;
-          let usedUrl = null;
           for (const u of tryUrls) {
             try {
               sRes = await fetch(u);
-              if (sRes.ok) {
-                usedUrl = u;
-                break;
-              }
+              if (sRes.ok) break;
             } catch (e) {
-              // network error for this attempt, try next
               console.warn('Students fetch attempt failed for', u, e);
             }
           }
@@ -135,39 +163,79 @@ const TeacherClasses = () => {
         }
 
         // Normalize and log each student's detected class
+        // fast synchronous normalization (make UI responsive by setting minimal normalized data ASAP)
         const normalized = studentsData.map(s => {
-          const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '').toString().trim();
-          console.log('Student fetched:', { id: s.id || s._id || s.studentId, name: s.name || s.fullName, detectedClass });
+          const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '').toString().trim().toLowerCase();
           return {
             raw: s,
             id: s.id || s._id || s.studentId || Math.random().toString(36).slice(2, 9),
             name: s.name || s.fullName || s.studentName || 'Unnamed',
             uid: s.uid || s.studentUid || s.studentId || '',
-            class: detectedClass || (assignedClass || ''),
+            // store normalized class (lowercase trimmed) for consistent matching
+            class: detectedClass || (assignedClass || '').toString().trim().toLowerCase(),
             picture: s.picture || s.avatar || '/placeholder-avatar.png',
             attendance: s.attendance || { present: 0, absent: 0, total: 0, history: [] }
           };
         });
 
-        // If server returned filtered results (we requested a class) we assume they already match.
-        // However, ensure final filter client-side to handle any mismatch (case-insensitive).
-        const finalList = assignedClass
-          ? normalized.filter(st => String(st.class).toLowerCase() === String(assignedClass).toLowerCase())
-          : normalized;
+        // log normalized values for debugging
+        // debugging log removed for performance
 
-        if (assignedClass && finalList.length === 0) {
+        // set students quickly to render normalized data immediately
+        setStudents(normalized);
+
+        // If adminMode => include all; else if assignedClass => filter by class
+        const finalList = adminMode
+          ? normalized
+          : (assignedClass ? normalized.filter(st => String(st.class).toLowerCase() === String(assignedClass).toLowerCase()) : normalized);
+
+        if (!adminMode && assignedClass && finalList.length === 0) {
           console.warn(`No students matched assigned class "${assignedClass}" after server-side attempt`);
           toast.info(`No students found for ${assignedClass}`);
         }
 
+        // update students with the final filtered list (fast set above ensures UI already had normalized data)
         setStudents(finalList);
+        // fetch results after students loaded (admin => all results)
+        try {
+          setResultsLoading(true);
+          const RESULTS_BASE = `${API_BASE}/api/results`;
+          let rUrl = RESULTS_BASE;
+          if (!adminMode) {
+            // try to fetch results for assignedClass first, else teacher
+            if (assignedClass) rUrl = `${RESULTS_BASE}?class=${encodeURIComponent(assignedClass)}`;
+            else if (staffIdFromAuth) rUrl = `${RESULTS_BASE}?teacherUid=${encodeURIComponent(staffIdFromAuth)}`;
+          }
+          const rRes = await fetch(rUrl);
+          if (rRes.ok) {
+            const rRaw = await rRes.json().catch(() => []);
+            const rArr = Array.isArray(rRaw) ? rRaw : (rRaw.data || rRaw.results || []);
+            setResults(rArr);
+          } else {
+            // fallback: fetch all results if filtered request failed
+            const rf = await fetch(RESULTS_BASE);
+            if (rf.ok) {
+              const rr = await rf.json().catch(() => []);
+              setResults(Array.isArray(rr) ? rr : (rr.data || rr.results || []));
+            } else {
+              setResults([]);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed fetching results', e);
+          setResults([]);
+        } finally {
+          setResultsLoading(false);
+        }
       } catch (err) {
         console.error('Network error fetching students', err);
         setStudents([]);
         toast.error('Could not load students from server. Please try again later.');
+      } finally {
+        setStudentsLoading(false);
       }
     };
- 
+
     loadStudentsForTeacher();
   }, [STUDENTS_BASE, TEACHERS_BASE]);
 
@@ -192,8 +260,8 @@ const TeacherClasses = () => {
           teachersName: s.teachersName || s.teacherName || null,
           teacherUid: s.teacherUid || null
         }));
-        // If teacher has an assigned class, only show subjects for that class
-        const visible = assignedClass ? mapped.filter(m => String(m.class).trim() === String(assignedClass).trim()) : mapped;
+        // If admin/principal, show all subjects; otherwise restrict to assigned class when present
+        const visible = isAdminView ? mapped : (assignedClass ? mapped.filter(m => String(m.class).trim() === String(assignedClass).trim()) : mapped);
         setClassSubjects(visible);
       } catch (err) {
         console.error('Failed to load subjects', err);
@@ -201,7 +269,7 @@ const TeacherClasses = () => {
       }
     };
     load();
-  }, [SUBJECTS_BASE, assignedClass]);
+  }, [SUBJECTS_BASE, assignedClass, isAdminView]);
 
   // Initialize attendance when opening modal
   const handleOpenAttendanceModal = () => {
@@ -569,9 +637,19 @@ const TeacherClasses = () => {
                 </div>
               </div>
               <div className="flex items-center space-x-4 min-w-0">
-                <div className="text-sm text-gray-700 truncate whitespace-nowrap">
-                  <span className="font-medium">Total Students:</span>{' '}
-                  <span className="inline-block ml-1 font-semibold">{students.length}</span>
+                <div className="text-sm text-gray-700 truncate whitespace-nowrap flex items-center gap-2">
+                  <span className="font-medium">Total Students:</span>
+                  {studentsLoading ? (
+                    <span className="inline-flex items-center gap-2 ml-1 text-sm font-semibold text-gray-700">
+                      <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      <span>Loading…</span>
+                    </span>
+                  ) : (
+                    <span className="inline-block ml-1 font-semibold">{students.length}</span>
+                  )}
                 </div>
                 
               </div>
@@ -584,35 +662,42 @@ const TeacherClasses = () => {
               <h2 className="text-lg font-medium text-gray-900">Students</h2>
             </div>
             <ul className="divide-y divide-gray-200">
-              {filteredStudents.map(student => (
-                <li key={student.id} className="px-6 py-4">
-                  <div className="flex items-center justify-between min-w-0">
-                    <div className="flex items-center min-w-0">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <img className="h-10 w-10 rounded-full object-cover" src={getImageSrc(student.picture)} alt="" />
-                      </div>
-                      <div className="ml-4 min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[14rem] sm:max-w-[20rem]">{student.name}</div>
-                        <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[10rem]">{student.uid}</div>
+              {studentsLoading ? (
+                // lightweight skeleton rows for fast perceived load
+                Array.from({ length: 6 }).map((_, i) => (
+                  <li key={i} className="px-6 py-4">
+                    <div className="flex items-center justify-between min-w-0">
+                      <div className="flex items-center min-w-0">
+                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-200 animate-pulse" />
+                        <div className="ml-4 min-w-0 w-full">
+                          <div className="h-4 bg-gray-200 rounded w-48 animate-pulse mb-2" />
+                          <div className="h-3 bg-gray-200 rounded w-28 animate-pulse" />
+                        </div>
                       </div>
                     </div>
-                    {/* <div className="flex items-center space-x-4">
-                      <div className="text-sm text-gray-500">
-                        <span className="font-medium">Attendance Rate:</span>{' '}
-                        {Math.round((student.attendance.present / student.attendance.total) * 100)}%
+                  </li>
+                ))
+              ) : (
+                <>
+                  {filteredStudents.map(student => (
+                    <li key={student.id} className="px-6 py-4">
+                      <div className="flex items-center justify-between min-w-0">
+                        <div className="flex items-center min-w-0">
+                          <div className="flex-shrink-0 h-10 w-10">
+                            <img className="h-10 w-10 rounded-full object-cover" src={getImageSrc(student.picture)} alt="" />
+                          </div>
+                          <div className="ml-4 min-w-0">
+                            <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[14rem] sm:max-w-[20rem]">{student.name}</div>
+                            <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[10rem]">{student.uid}</div>
+                          </div>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleViewStudentHistory(student)}
-                        className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                      >
-                        View Details
-                      </button>
-                    </div> */}
-                  </div>
-                </li>
-              ))}
-              {filteredStudents.length === 0 && (
-                <li className="px-6 py-4 text-center text-gray-500">No students found matching your search.</li>
+                    </li>
+                  ))}
+                  {filteredStudents.length === 0 && (
+                    <li className="px-6 py-4 text-center text-gray-500">No students found matching your search.</li>
+                  )}
+                </>
               )}
             </ul>
           </div>

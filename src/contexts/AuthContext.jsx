@@ -10,16 +10,55 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Removed unused isOffline state
 
   // Load saved user from localStorage
   useEffect(() => {
-    const savedUser = localStorage.getItem("schoolUser");
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setCurrentUser(parsedUser);
-      setUserRole(parsedUser.role);
-    }
-    setLoading(false);
+    let mounted = true;
+    (async () => {
+      try {
+        // Optional: make Firestore use long polling (helps behind some proxies/firewalls)
+        try {
+          const { getFirestore } = await import('firebase/firestore');
+          const db = getFirestore();
+          if (db && typeof db.settings === 'function') {
+            db.settings({ experimentalForceLongPolling: true });
+          }
+        } catch {
+          // ignore if modular import or settings not available
+        }
+
+        // Attempt to read user from live backend (Firestore / auth) if configured
+        // If network is flaky this may throw (Firestore timeout); catch below.
+        const saved = localStorage.getItem('schoolUser');
+        if (saved && mounted) {
+          try {
+            const parsed = JSON.parse(saved);
+            setCurrentUser(parsed);
+            setUserRole(parsed?.role ?? null);
+          } catch {
+            // ignore parse errors
+          }
+        }
+
+        // If you also do a realtime check against Firestore here, wrap it:
+        // Example:
+        // try { await someFirestoreCheck(); } catch(e) { throw e; }
+
+        if (mounted) {
+          setLoading(false);
+        }
+      } catch (err) {
+        // Firestore network/timeouts often surface as 'Could not reach Cloud Firestore backend' or code 'unavailable'
+        console.warn('[AuthContext] Firestore connectivity issue:', err?.message || err);
+        if (mounted) {
+          setLoading(false);
+          // keep any cached user loaded above; surface a small message to the user
+          try { toast.info('Offline: unable to reach auth backend — running from cache.'); } catch (_) {}
+        }
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
 
   /**
@@ -66,6 +105,11 @@ export const AuthProvider = ({ children }) => {
       if (!teacherSnap.empty) {
         const teacherDoc = teacherSnap.docs[0];
         const teacherData = teacherDoc.data();
+
+        // Prevent disabled teachers from logging in
+        if (teacherData.status && String(teacherData.status).toLowerCase() === 'inactive') {
+          return { success: false, message: 'Your account has been disabled. Contact the admin.' };
+        }
 
         if (teacherData.passwordHash) {
           const passwordMatch = await bcrypt.compare(password, teacherData.passwordHash);

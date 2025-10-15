@@ -1,11 +1,11 @@
 // src/pages/Admin/TeacherManagement.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
-import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, EyeOff } from 'lucide-react';
+import { PlusIcon, PencilIcon, TrashIcon, EyeIcon, EyeOff, PencilLine, Ban, CheckCheck  } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Add API base (use Vite env variable if present)
-const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 
 
@@ -81,6 +81,10 @@ const TeacherManagement = () => {
   // Admins state + loading
   const [admins, setAdmins] = useState([]);
   const [adminsLoading, setAdminsLoading] = useState(false);
+
+  // new: disabling state for teacher login
+  const [disablingId, setDisablingId] = useState(null);
+  const [enablingId, setEnablingId] = useState(null);
 
   // prevent background scroll when modal open
   useEffect(() => {
@@ -501,6 +505,88 @@ const TeacherManagement = () => {
     return matchesSearch && matchesStatus;
   });
 
+  // add the handler near other action handlers
+  const handleDisable = async (teacher) => {
+    if (!teacher) return;
+    const id = teacher.id || teacher._id || teacher.uid;
+    if (!id) {
+      toast.error('Teacher identifier missing.');
+      return;
+    }
+
+    const ok = window.confirm(
+      `Disable login for ${teacher.name || teacher.uid || 'this teacher'}?\n\n` +
+      `They will be prevented from signing in. You can enable the account again later using the "Enable" action. Proceed?`
+    );
+    if (!ok) return;
+
+    try {
+      setDisablingId(id);
+      const res = await fetch(`${API_BASE}/api/teachers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'inactive' })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `Disable failed (${res.status})`);
+      }
+      const payload = await res.json().catch(() => null);
+      const updated = payload?.teacher || payload || { status: 'inactive' };
+      // update local teachers list if present
+      if (typeof setTeachers === 'function') {
+        setTeachers(prev => prev.map(t => (t.id === id || t._id === id || t.uid === id ? { ...t, ...updated } : t)));
+      }
+      toast.success(`${teacher.name || teacher.uid || 'Teacher'} disabled.`);
+    } catch (err) {
+      console.error('Failed to disable teacher', err);
+      toast.error(err.message || 'Failed to disable teacher.');
+    } finally {
+      setDisablingId(null);
+    }
+  };
+
+  // enable handler (confirm and re-activate)
+  const handleEnable = async (teacher) => {
+    if (!teacher) return;
+    const id = teacher.id || teacher._id || teacher.uid;
+    if (!id) {
+      toast.error('Teacher identifier missing.');
+      return;
+    }
+
+    const ok = window.confirm(
+      `Enable login for ${teacher.name || teacher.uid || 'this teacher'}?\n\n` +
+      `This will restore sign-in access for the teacher. Proceed?`
+    );
+    if (!ok) return;
+
+    try {
+      setEnablingId(id);
+      const res = await fetch(`${API_BASE}/api/teachers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active' })
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `Enable failed (${res.status})`);
+      }
+      const payload = await res.json().catch(() => null);
+      const updated = payload?.teacher || payload || { status: 'active' };
+      // update local teachers list if present
+      if (typeof setTeachers === 'function') {
+        setTeachers(prev => prev.map(t => (t.id === id || t._id === id || t.uid === id ? { ...t, ...updated } : t)));
+      }
+      toast.success(`${teacher.name || teacher.uid || 'Teacher'} enabled.`);
+    } catch (err) {
+      console.error('Failed to enable teacher', err);
+      toast.error(err.message || 'Failed to enable teacher.');
+    } finally {
+      setEnablingId(null);
+    }
+  };
+
   return (
     <DashboardLayout title="Teacher Management">
       {/* Header with Add Teacher button */}
@@ -597,6 +683,38 @@ const TeacherManagement = () => {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+  onClick={() => {
+    const status = (teacher.status || '').toString().toLowerCase();
+    if (status === 'inactive' || status === 'disabled') {
+      handleEnable(teacher);
+    } else {
+      handleDisable(teacher);
+    }
+  }}
+  disabled={
+    disablingId === (teacher.id || teacher._id || teacher.uid) ||
+    enablingId === (teacher.id || teacher._id || teacher.uid)
+  }
+  title={
+    (teacher.status || '').toString().toLowerCase() === 'inactive'
+      ? 'Enable teacher login'
+      : 'Disable teacher login'
+  }
+  className={`pr-2 ${
+    disablingId === (teacher.id || teacher._id || teacher.uid) || enablingId === (teacher.id || teacher._id || teacher.uid)
+      ? 'opacity-60 cursor-not-allowed'
+      : ((teacher.status || '').toString().toLowerCase() === 'inactive' ? 'text-green-600 hover:text-green-900' : 'text-red-600 hover:text-red-900')
+  }`}
+  aria-label="Toggle login"
+>
+  { (disablingId === (teacher.id || teacher._id || teacher.uid) || enablingId === (teacher.id || teacher._id || teacher.uid))
+    ? <svg className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+    : ((teacher.status || '').toString().toLowerCase() === 'inactive')
+      ? <CheckCheck  className="h-4 w-4 sm:h-5 sm:w-5" />
+      : <Ban className="h-4 w-4 sm:h-5 sm:w-5" />
+  }
+</button>
                       <button onClick={() => handleViewTeacher(teacher)} className="text-blue-600 hover:text-blue-900" aria-label="View">
                         <EyeIcon className="h-4 w-4 sm:h-5 sm:w-5" />
                       </button>
@@ -663,6 +781,9 @@ const TeacherManagement = () => {
                         <div className="text-sm text-gray-900">{a.AdminUid || a.adminUid || '—'}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onClick={() => { setEntityType('admin'); handleViewTeacher(a); }} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View">
+                          <Ban className="h-5 w-5" />
+                        </button>
                         <button onClick={() => { setEntityType('admin'); handleViewTeacher(a); }} className="text-blue-600 hover:text-blue-900 mr-3" aria-label="View">
                           <EyeIcon className="h-5 w-5" />
                         </button>

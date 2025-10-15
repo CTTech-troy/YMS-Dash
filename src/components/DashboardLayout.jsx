@@ -26,11 +26,38 @@ const DashboardLayout = ({
 function avatarSrc(input) {
   // normalize when a user object is passed
   if (!input) return "/images/default-avatar.png";
+
+  // handle object inputs (user object or buffer-like)
   if (typeof input === "object") {
+    // if buffer-like data present (ArrayBuffer / Uint8Array / Array / base64 string)
+    const data = input.data ?? input.buffer ?? input.avatar ?? input.picture ?? input.profilePicture ?? null;
+    if (data) {
+      // string base64 inside object
+      if (typeof data === "string") return avatarSrc(data);
+      try {
+        // ArrayBuffer / Uint8Array / Array -> convert to base64
+        let bytes = null;
+        if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+        else if (data instanceof Uint8Array) bytes = data;
+        else if (Array.isArray(data)) bytes = new Uint8Array(data);
+        if (bytes) {
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const b64 = typeof window !== "undefined" ? window.btoa(binary) : Buffer.from(binary, "binary").toString("base64");
+          const prefix = b64.slice(0, 8);
+          const mime = prefix.startsWith("/9j/") ? "image/jpeg" : prefix.startsWith("iVBORw0K") ? "image/png" : "image/jpeg";
+          return `data:${mime};base64,${b64}`;
+        }
+      } catch (e) {
+        // fall through to other handlers
+      }
+    }
+    // fallback: try known string fields on the object
     const a = input.avatar ?? input.picture ?? input.profilePicture ?? input.pictureSrc ?? input.profileImage ?? "";
     return avatarSrc(a);
   }
 
+  // non-object inputs: expect string
   if (typeof input !== "string") return "/images/default-avatar.png";
   const s = input.trim();
   if (!s) return "/images/default-avatar.png";
@@ -41,13 +68,17 @@ function avatarSrc(input) {
   // absolute or relative URL (keep as-is)
   if (/^https?:\/\//i.test(s) || s.startsWith("/")) return s;
 
-  // likely base64 (very rough check)
+  // likely base64 (remove whitespace/newlines)
   const base64Candidate = s.replace(/\s+/g, "");
-  if (/^[A-Za-z0-9+/=]+$/.test(base64Candidate) && base64Candidate.length > 50) {
-    return `data:image/jpeg;base64,${base64Candidate}`;
+  if (/^[A-Za-z0-9+/=]+$/.test(base64Candidate) && base64Candidate.length > 20) {
+    // detect common signatures for mime
+    const jpegSig = base64Candidate.startsWith("/9j/");
+    const pngSig = base64Candidate.startsWith("iVBORw0K");
+    const mime = jpegSig ? "image/jpeg" : pngSig ? "image/png" : "image/jpeg";
+    return `data:${mime};base64,${base64Candidate}`;
   }
 
-  // fallback: return original string to avoid creating an invalid data: URL
+  // fallback: return original string to avoid invalid data URL
   return s;
 }
 
@@ -127,7 +158,8 @@ function avatarSrc(input) {
             </button>
           </div>
           <div className="flex-shrink-0 flex items-center px-4">
-            <h1 className="text-lg sm:text-base font-bold text-blue-600 truncate whitespace-nowrap">Yetland Management</h1>
+            <img className="h-8 w-auto" src="/logo.png" alt="Yetland Management" />
+            <h1 className="text-lg sm:text-base font-bold text-green-600 truncate whitespace-nowrap">Yetland Management</h1>
           </div>
           <div className="mt-5 flex-1 h-0 overflow-y-auto">
             <nav className="px-2 space-y-1">
@@ -145,7 +177,8 @@ function avatarSrc(input) {
           <div className="flex flex-col w-64">
             <div className="flex flex-col flex-grow border-r border-gray-200 pt-5 pb-4 bg-white overflow-y-auto">
               <div className="flex items-center flex-shrink-0 px-4">
-                <h1 className="text-lg sm:text-base font-bold text-blue-600 truncate whitespace-nowrap">Yetland Management</h1>
+              <img className="h-8 w-auto" src="/logo.png" alt="Yetland Management" />
+                <h1 className="text-lg sm:text-base font-bold text-green-600 truncate whitespace-nowrap">Yetland Management</h1>
               </div>
               <div className="mt-8 flex-grow flex flex-col">
                 <nav className="flex-1 px-2 bg-white space-y-1">
@@ -178,6 +211,7 @@ function avatarSrc(input) {
                 <div>
                   <button type="button" className="max-w-xs flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" id="user-menu" aria-expanded="false" aria-haspopup="true" onClick={() => setShowProfileMenu(!showProfileMenu)}>
                     <span className="sr-only">Open user menu</span>
+                    <img className="h-8 w-8 rounded-full" src={avatarSrc(displayUser)} alt="" />
                     <span className="ml-2 text-sm text-gray-700 truncate whitespace-nowrap max-w-[10rem]">{displayUser?.name || displayUser?.fullName || 'User'}</span>
                     <ChevronDownIcon className="ml-1 h-5 w-5 text-gray-400" />
                   </button>

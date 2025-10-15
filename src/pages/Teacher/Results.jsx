@@ -71,7 +71,7 @@ const TeacherResults = () => {
   // Reintroduced state to hold class students (filtered from Student API)
   const [classStudents, setClassStudents] = useState([]);
   const [allStudents, setAllStudents] = useState([]); // full fetched list for lookups
-  const [teacherAssignedClass, setTeacherAssignedClass] = useState(''); // new state to share assigned class with subjects logic
+  // Removed unused teacherAssignedClass state
   // Removed unused teacherClass state
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -89,6 +89,11 @@ const TeacherResults = () => {
     teacherComment: '',
     published:''
   });
+
+  // NEW: cached students + loading state
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
   // helper: reset form to empty for create
   const resetForm = () => {
     setFormData({
@@ -170,6 +175,15 @@ const TeacherResults = () => {
       resetForm();
       // refresh list to ensure consistency
       await loadResults();
+      // Best-effort: update student profile with latest session/term after edit
+      try {
+        const resolvedStudent = selectedStudent || findStudentById(formData.studentId);
+        const studentIdOrUid = resolvedStudent?.id || resolvedStudent?.uid || formData.studentId;
+        await api.put(`/api/students/${encodeURIComponent(studentIdOrUid)}`, {
+          lastResultSession: formData.session,
+          lastResultTerm: formData.term
+        }).catch(() => {});
+      } catch {}
     } catch (err) {
       console.error('Failed to update result', err, err?.response?.data);
       const msg = err?.response?.data?.message || 'Failed to update result.';
@@ -286,44 +300,110 @@ const TeacherResults = () => {
     };
   };
 
-  // set teacherAssignedClass from currentUser once
-  useEffect(() => {
-    if (!currentUser) return;
-    // adjust this field name if your user object uses a different key
-    setTeacherAssignedClass(currentUser.assignedClass || currentUser.class || '');
-  }, [currentUser]);
+  // Removed effect for teacherAssignedClass (unused)
 
   // Fetch students list from backend and populate allStudents and classStudents (filtered by assigned class)
   useEffect(() => {
     if (!currentUser) return;
     let mounted = true;
-    const fetchStudents = async () => {
-      try {
-        const res = await api.get('/api/students');
-        const raw = res.data;
-        if (typeof raw === 'string' && raw.trim().startsWith('<')) {
-          throw new Error('Students API returned HTML (check server or baseURL).');
-        }
-        const data = Array.isArray(raw) ? raw : (Array.isArray(raw.data) ? raw.data : (Array.isArray(raw.students) ? raw.students : []));
-        if (!mounted) return;
-        setAllStudents(data || []);
+    const cacheKey = `yms_students_cache_${currentUser.uid || currentUser.id || 'anon'}`;
 
-        // If current user is a teacher, only keep students whose class matches the teacher's assigned class
-        if (isTeacher && teacherAssignedClass) {
-          const filtered = (data || []).filter(s => normalizeClass(s.class || '') === normalizeClass(teacherAssignedClass || ''));
-          setClassStudents(filtered);
-        } else {
-          // admin and others can access full list (teacher Add Result UI will still restrict via isTeacher)
-          setClassStudents(data || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch students', err);
-        toast.error('Failed to load students. Check server/API base URL.');
+    const loadCache = () => {
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch {
+        return null;
       }
     };
-    fetchStudents();
+
+    const saveCache = (all, classList) => {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ allStudents: all, classStudents: classList, ts: Date.now() }));
+      } catch {}
+    };
+
+    (async () => {
+      setLoadingStudents(true);
+      setLoadingProgress(0);
+
+      // show cached immediately if present
+      const cached = loadCache();
+      if (cached && mounted) {
+        setAllStudents(cached.allStudents || []);
+        setClassStudents(cached.classStudents || []);
+        setLoadingProgress(50);
+      }
+
+      try {
+        // attempt to resolve assignedClass from teacher profile first
+        let assignedClass = currentUser.assignedClass || currentUser.class || '';
+        if (currentUser?.uid) {
+          try {
+            const tRes = await api.get(`/api/teachers/${encodeURIComponent(currentUser.uid)}`);
+            const tData = tRes.data;
+            const teacher = Array.isArray(tData) ? tData[0] : tData;
+            assignedClass = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClass;
+          } catch {}
+        }
+        setTeacherAssignedClass(assignedClass || '');
+
+        const sRes = await api.get('/api/students');
+        const raw = sRes.data;
+        if (typeof raw === 'string' && raw.trim().startsWith('<')) throw new Error('Students API returned HTML');
+        // Removed setTeacherAssignedClass (unused)
+
+        // normalize
+        const normalized = studentsArray.map(s => {
+          const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '').toString();
+          return {
+            id: String(s.id || s._id || s.uid || Math.random().toString(36).slice(2,9)),
+            uid: String(s.uid || s.studentUid || s.id || ''),
+            name: s.name || s.fullName || s.studentName || 'Unnamed',
+            picture: normalizeStudentPicture(s.picture || s.avatar || s.image || ''),
+            class: normalizeClass(detectedClass),
+            raw: s
+          };
+        });
+
+        if (!mounted) return;
+        setAllStudents(normalized);
+
+        const assignedNorm = normalizeClass(assignedClass);
+        const matched = assignedNorm ? normalized.filter(st => normalizeClass(st.class || '') === assignedNorm) : normalized;
+
+        // exclude students that already have results
+        const filteredExcludingAdded = matched.filter(fs => !results.some(r => String(r.studentId) === String(fs.id) || String(r.studentId) === String(fs.uid)));
+        setClassStudents(filteredExcludingAdded);
+
+        // persist cache for immediate display on next load
+        saveCache(normalized, filteredExcludingAdded);
+        setLoadingProgress(100);
+      } catch (err) {
+        console.error('Failed to load students', err);
+        if (mounted) {
+          setAllStudents(prev => prev || []);
+          setClassStudents(prev => prev || []);
+          toast.error('Unable to load students from server.');
+        }
+      } finally {
+        setLoadingStudents(false);
+      }
+    })();
+
     return () => { mounted = false; };
-  }, [currentUser, teacherAssignedClass, showAddModal]);
+  }, [currentUser, results, showAddModal]);
+
+  // Clear cached student data on logout
+  useEffect(() => {
+    if (currentUser) return;
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('yms_students_cache_')) localStorage.removeItem(k);
+      });
+    } catch {}
+  }, [currentUser]);
 
   // --- UPDATED: load results from explicit backend URL and filter strictly by staffuid === currentUser.uid ---
   const loadResults = async () => {
@@ -694,6 +774,36 @@ useEffect(() => {
       await api.post('/api/results', payload);
       // Publication is handled separately; just confirm save to the teacher
       toast.success('Result saved.');
+
+      // update student's profile with latest session & term (best-effort)
+      (async () => {
+        try {
+          // prefer document id if available, otherwise try uid
+          const studentIdOrUid = resolvedStudent?.id || resolvedStudent?.uid || formData.studentId;
+          await api.put(`/api/students/${encodeURIComponent(studentIdOrUid)}`, {
+            lastResultSession: formData.session,
+            lastResultTerm: formData.term
+          });
+
+          // update local cache/state so UI reflects the change immediately
+          setAllStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
+          setClassStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
+          // update cached copy
+          try {
+            const cacheKey = `yms_students_cache_${currentUser.uid || currentUser.id || 'anon'}`;
+            const raw = localStorage.getItem(cacheKey);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && Array.isArray(parsed.allStudents)) {
+                parsed.allStudents = parsed.allStudents.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s);
+                localStorage.setItem(cacheKey, JSON.stringify(parsed));
+              }
+            }
+          } catch {}
+        } catch (err) {
+          console.warn('Updating student last result failed', err?.response?.data || err);
+        }
+      })();
 
       // Refresh results so the newly saved result appears immediately in the dashboard
       await loadResults();

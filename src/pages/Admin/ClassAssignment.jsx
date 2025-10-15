@@ -14,10 +14,11 @@ const availableClasses = [
   'Primary 2',
   'Primary 3',
   'Primary 4',
-  'Primary 5',
+  'Primary 6',
   'JSS1',
   'JSS2',
-  'Principal'
+  'Principal',
+  'Admin'
 ];
 
 const ClassAssignment = () => {
@@ -31,7 +32,7 @@ const ClassAssignment = () => {
     class: ''
   });
 
-  const API_BASE = (import.meta.env.VITE_API_URL);
+const API_BASE = import.meta.env.VITE_API_URL || ' http://localhost:5000';
  
    // 🔄 Fetch teachers from DB
    useEffect(() => {

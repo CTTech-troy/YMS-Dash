@@ -9,8 +9,31 @@ import autoTable from 'jspdf-autotable';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const StudentManagement = () => {
-  const [students, setStudents] = useState([]);
+  // hydrate from last-session snapshot for instant UI
+  const _cachedStudentsSnapshot = (() => {
+    try { return JSON.parse(sessionStorage.getItem('studentsSnapshot') || 'null'); } catch { return null; }
+  })();
+  const [students, setStudents] = useState(() => (_cachedStudentsSnapshot?.students ?? []));
   const [isLoading, setIsLoading] = useState(true);
+  // pagination / progressive load state
+  const [nextPageToken, setNextPageToken] = useState(() => (_cachedStudentsSnapshot?.nextPageToken ?? null));
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isFetchingPage, setIsFetchingPage] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const scrollDebounceRef = useRef(null);
+  const PAGE_LIMIT = 10; // initial page size
+  const cacheRef = useRef(Boolean(_cachedStudentsSnapshot));
+
+  // persist snapshot helper
+  const persistSnapshot = (arr, token = null) => {
+    try {
+      const snap = { students: arr, nextPageToken: token ?? nextPageToken };
+      sessionStorage.setItem('studentsSnapshot', JSON.stringify(snap));
+    } catch (e) {
+      // ignore storage errors
+    }
+  };
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -81,25 +104,178 @@ const StudentManagement = () => {
     return "";
   };
 
+  // progressive page loader using backend ?limit= & ?startAfter=
   useEffect(() => {
-    const fetchStudents = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(`${API_BASE}/api/students`);
-        if (!res.ok) throw new Error(`Server ${res.status}`);
-        const payload = await res.json();
-        const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
-        setStudents(list.map(normalizeStudent));
-      } catch (err) {
-        console.error(err);
-        toast.error('Could not load students from server.');
-        setStudents([]);
-      } finally {
-        setIsLoading(false);
-      }
+     let mounted = true;
+     const ac = new AbortController();
+     const AUTO_LOAD = true; // automatically fetch pages until server signals no more
+     const PAUSE_MS = 150; // pause between pages to keep UI responsive
+
+    // merge helper: append only new students (dedupe by id/uid)
+    const mergeAndMap = (prev, rawList) => {
+      const mapped = rawList.map(normalizeStudent);
+      const existing = new Set(prev.map(s => (s.id || s.uid)));
+      const toAdd = mapped.filter(m => !(existing.has(m.id || m.uid)));
+      return [...prev, ...toAdd];
     };
-    fetchStudents();
+
+    // fetch a single page and return token
+    async function fetchPageOnce(startAfter = null, append = false) {
+      if (!mounted) return { token: null, list: [] };
+      setIsFetchingPage(true);
+      if (append) setIsLoadingMore(true);
+      else setIsLoading(true);
+
+      try {
+        const params = new URLSearchParams();
+        params.set('limit', String(PAGE_LIMIT));
+        if (startAfter) params.set('startAfter', String(startAfter));
+        const url = `${API_BASE}/api/students?${params.toString()}`;
+        console.debug('[Students] fetch page', url);
+        const res = await fetch(url, { signal: ac.signal });
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          throw new Error(t || `Server ${res.status}`);
+        }
+        const json = await res.json().catch(() => null);
+        const list = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+
+        // append vs replace; if we had a cache on load, prefer append to avoid replacing cached entries
+        setStudents(prev => {
+          if (append || cacheRef.current) {
+            const merged = mergeAndMap(prev, list);
+            // persist the merged snapshot
+            persistSnapshot(merged, json?.nextPageToken ?? null);
+            return merged;
+          }
+          const mapped = list.map(normalizeStudent);
+          persistSnapshot(mapped, json?.nextPageToken ?? null);
+          return mapped;
+        });
+
+        const token = json?.nextPageToken ?? null;
+        setNextPageToken(token);
+        setHasMore(Boolean(token));
+        // mark that cache has been reconciled
+        cacheRef.current = false;
+        return { token, list };
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          console.debug('[Students] fetch aborted');
+        } else {
+          console.error('[Students] fetch page error', err);
+          toast.error('Could not load students from server.');
+        }
+        return { token: null, list: [] };
+      } finally {
+        if (!ac.signal.aborted) {
+          setIsFetchingPage(false);
+          setIsLoading(false);
+          setIsLoadingMore(false);
+        }
+      }
+    }
+
+    // sequentially auto-load pages (yields between pages)
+    async function autoLoadAllPages() {
+      try {
+        // first page (replace)
+        const first = await fetchPageOnce(null, false);
+        if (!mounted) return;
+
+        // show table as soon as first page is present
+        setIsLoading(false);
+
+        if (!AUTO_LOAD) return;
+
+        // continue fetching while server provides a nextPageToken
+        let token = first.token;
+        while (mounted && token) {
+          // yield to browser: use requestIdleCallback when available
+          await new Promise((resolve) => {
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+              window.requestIdleCallback(resolve, { timeout: 200 });
+            } else {
+              setTimeout(resolve, PAUSE_MS);
+            }
+          });
+
+          const nxt = await fetchPageOnce(token, true);
+          if (!mounted) break;
+          token = nxt.token;
+        }
+      } catch (err) {
+        console.error('[Students] autoLoadAllPages error', err);
+      }
+    }
+
+    // If we have a cached snapshot, do not replace it — start auto-loading pages and append
+    if (cacheRef.current && _cachedStudentsSnapshot) {
+      // UI already hydrated from cache; begin auto-load from cached token
+      setIsLoading(false);
+      // if cache provided a nextPageToken, continue from it; otherwise start from beginning to reconcile
+      const startToken = _cachedStudentsSnapshot.nextPageToken ?? null;
+      // auto-load will start by fetching first page (which will append due to cacheRef)
+      autoLoadAllPages();
+    } else {
+      fetchPageOnce(null, false).then(() => {
+        // start auto-load in background (non-blocking)
+        autoLoadAllPages();
+      });
+    }
+
+    return () => {
+      mounted = false;
+      ac.abort();
+    };
   }, []);
+
+  // fetch next page (used by scroll or button)
+  const loadMore = async () => {
+    if (!hasMore || isFetchingPage) return;
+    setIsFetchingPage(true);
+    setIsLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('limit', String(PAGE_LIMIT));
+      if (nextPageToken) params.set('startAfter', String(nextPageToken));
+      const url = `${API_BASE}/api/students?${params.toString()}`;
+      console.debug('[Students] loadMore', url);
+      const res = await fetch(url);
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || `Server ${res.status}`);
+      }
+      const json = await res.json().catch(() => null);
+      const list = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+      setStudents(prev => [...prev, ...list.map(normalizeStudent)]);
+      const token = json?.nextPageToken ?? null;
+      setNextPageToken(token);
+      setHasMore(Boolean(token));
+    } catch (err) {
+      console.error('[Students] loadMore error', err);
+      toast.error('Failed to load more students.');
+    } finally {
+      setIsFetchingPage(false);
+      setIsLoadingMore(false);
+    }
+  };
+
+  // infinite scroll near-bottom with debounce (still triggers manual loadMore if needed)
+  useEffect(() => {
+    const onScroll = () => {
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+      scrollDebounceRef.current = setTimeout(() => {
+        const nearBottom = (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 350);
+        if (nearBottom && hasMore && !isFetchingPage) loadMore();
+      }, 150);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+    };
+  }, [hasMore, isFetchingPage, nextPageToken]);
 
   const handleInputChange = e => {
     const { name, value } = e.target;
@@ -151,7 +327,13 @@ const StudentManagement = () => {
       }
       const created = await res.json();
       const studentRecord = created?.data || created;
-      setStudents(prev => [...prev, normalizeStudent(studentRecord)]);
+      setStudents(prev => {
+        const mapped = normalizeStudent(studentRecord);
+        const existing = new Set(prev.map(s => s.id || s.uid));
+        const next = existing.has(mapped.id || mapped.uid) ? prev : [...prev, mapped];
+        persistSnapshot(next, nextPageToken);
+        return next;
+      });
       setFormData(emptyForm);
       setShowAddModal(false);
       toast.success('Student added.');
@@ -197,8 +379,20 @@ const StudentManagement = () => {
       }
       const saved = await res.json();
       const savedRecord = saved?.data || saved;
-      if (method === 'PUT') setStudents(prev => prev.map(s => (s.id === savedRecord.id ? normalizeStudent(savedRecord) : s)));
-      else setStudents(prev => [normalizeStudent(savedRecord), ...prev]);
+      if (method === 'PUT') {
+        setStudents(prev => {
+          const updated = prev.map(s => (s.id === savedRecord.id ? normalizeStudent(savedRecord) : s));
+          persistSnapshot(updated, nextPageToken);
+          return updated;
+        });
+      } else {
+        setStudents(prev => {
+          const mapped = normalizeStudent(savedRecord);
+          const next = [(mapped), ...prev.filter(s => (s.id || s.uid) !== (mapped.id || mapped.uid))];
+          persistSnapshot(next, nextPageToken);
+          return next;
+        });
+      }
       setIsEditing(false);
       setShowViewModal(false);
       setSelectedStudent(null);
@@ -222,7 +416,11 @@ const StudentManagement = () => {
         const t = await res.text().catch(() => '');
         throw new Error(t || `Delete failed ${res.status}`);
       }
-      setStudents(prev => prev.filter(s => s.id !== idToUse && s.uid !== idToUse));
+      setStudents(prev => {
+        const next = prev.filter(s => s.id !== idToUse && s.uid !== idToUse);
+        persistSnapshot(next, nextPageToken);
+        return next;
+      });
       toast.success('Deleted');
     } catch (err) {
       console.error(err);
@@ -382,17 +580,30 @@ const StudentManagement = () => {
     </div>
 
     {/* Promote All */}
-   <button
-  type="button"
-  onClick={handlePromoteAll}
-  disabled={students.length === 0}
-  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-60"
->
-  <ArrowUpCircle className="w-4 h-4" />
-  Promote All
-</button>
+   <div className="flex items-center gap-2 flex-wrap">
+     <button
+       type="button"
+       onClick={handlePromoteAll}
+       disabled={students.length === 0}
+       className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-60"
+     >
+       <ArrowUpCircle className="w-4 h-4" />
+       Promote All
+     </button>
+
+     {/* <button
+       type="button"
+       onClick={loadMore}
+       disabled={!hasMore || isFetchingPage}
+       aria-disabled={!hasMore || isFetchingPage}
+       className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md shadow-sm text-white 
+         ${isFetchingPage || isLoadingMore ? 'bg-gray-400 cursor-wait' : (hasMore ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-200 text-gray-600')} `}
+     >
+       <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 3v2a5 5 0 015 5h2a7 7 0 00-7-7zM4.22 4.22l1.42 1.42A7 7 0 0010 17v-2a5 5 0 01-5-5H3a7 7 0 001.22-5.78zM10 13a3 3 0 100-6 3 3 0 000 6z"/></svg>
+       {isLoadingMore || isFetchingPage ? 'Loading…' : (hasMore ? 'Load more' : 'All loaded')}
+     </button> */}
+   </div>
   </div>
-</div>
 
       <div className="flex flex-col mb-10"> {/* increased bottom margin so fixed pagination doesn't never cover content */}
         {isLoading ? (
@@ -401,7 +612,8 @@ const StudentManagement = () => {
           <div className="-my-5 overflow-x-auto pb-1">
             <div className="py-2">
               {/* table container - wider and centered */}
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="w-full mt-12 mx-auto px-4 sm:px-6 lg:px-8">
+
 
                 {/* Mobile: stacked cards */}
                 <div className="space-y-4 md:hidden">
@@ -437,53 +649,68 @@ const StudentManagement = () => {
 
                 {/* Desktop / Tablet: table */}
                 <div className="hidden md:block">
-                  <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
-                    <table className="min-w-full divide-y divide-gray-200 table-auto">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Student</th>
-                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">UID</th>
-                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Class</th>
-                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">LIN Number</th>
-                          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700 uppercase tracking-wide">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {displayedStudents.length === 0 ? (
+                  <div className="shadow sm:rounded-lg">
+                    <div className="w-full overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 table-fixed">
+                        {/* stable column sizing helps responsiveness */}
+                        <colgroup>
+                          <col className="w-2/5" />
+                          <col className="w-1/5" />
+                          <col className="w-1/5" />
+                          <col className="w-1/5" />
+                          <col style={{width: '1%'}} />
+                        </colgroup>
+                        <thead className="bg-gray-50">
                           <tr>
-                            <td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">
-                              {students.length === 0 ? 'No students found.' : 'No students match your search.'}
-                            </td>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Student</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">UID</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">Class</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700 uppercase tracking-wide">LIN Number</th>
+                            <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700 uppercase tracking-wide">Actions</th>
                           </tr>
-                        ) : displayedStudents.map((student, idx) => (
-                          <tr key={student.id || student.uid || idx}>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <div className="flex-shrink-0 h-10 w-10">
-                                  <img
-                                    className="h-10 w-10 rounded-full object-cover"
-                                    src={student.picture || `https://source.unsplash.com/random/300x300?sig=${encodeURIComponent(student.uid || student.id || idx)}`}
-                                    alt=""
-                                  />
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {displayedStudents.length === 0 ? (
+                            <tr>
+                              <td colSpan="5" className="px-6 py-8 text-center text-sm text-gray-500">
+                                {students.length === 0 ? 'No students found.' : 'No students match your search.'}
+                              </td>
+                            </tr>
+                          ) : displayedStudents.map((student, idx) => (
+                            <tr key={student.id || student.uid || idx}>
+                              <td className="px-6 py-4 align-top">
+                                <div className="flex items-start">
+                                  <div className="flex-shrink-0 h-10 w-10 rounded-full overflow-hidden">
+                                    <img
+                                      className="h-full w-full object-cover"
+                                      src={student.picture || `https://source.unsplash.com/random/300x300?sig=${encodeURIComponent(student.uid || student.id || idx)}`}
+                                      alt=""/>
+                                  </div>
+                                  <div className="ml-4 min-w-0">
+                                    <div className="text-sm font-medium text-gray-900 truncate">{student.name}</div>
+                                    <div className="text-xs text-gray-500 truncate">{student.dob} · {student.gender} · {student.age ? `${student.age} yrs` : '—'}</div>
+                                  </div>
                                 </div>
-                                <div className="ml-4 min-w-0">
-                                  <div className="text-sm font-medium text-gray-900 truncate">{student.name}</div>
-                                  <div className="text-xs text-gray-500 truncate">{student.dob} · {student.gender} · {student.age ? `${student.age} yrs` : '—'}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 truncate">{student.uid || generateStudentId()}</div></td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate">{student.class}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate">{student.linNumber || '—'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button onClick={() => handleViewStudent(student)} className="text-blue-600 hover:text-blue-900 mr-3"><EyeIcon className="h-5 w-5" /></button>
-                              <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="text-indigo-600 hover:text-indigo-900 mr-3"><PencilIcon className="h-5 w-5" /></button>
-                              <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              </td>
+                              <td className="px-6 py-4 align-top">
+                                <div className="text-sm text-gray-900 max-w-[140px] truncate">{student.uid || generateStudentId()}</div>
+                              </td>
+                              <td className="px-6 py-4 align-top">
+                                <div className="text-sm text-gray-500 max-w-[140px] truncate">{student.class}</div>
+                              </td>
+                              <td className="px-6 py-4 align-top">
+                                <div className="text-sm text-gray-500 max-w-[140px] truncate">{student.linNumber || '—'}</div>
+                              </td>
+                              <td className="px-6 py-4 text-right align-top whitespace-nowrap">
+                                <button onClick={() => handleViewStudent(student)} className="text-blue-600 hover:text-blue-900 mr-3"><EyeIcon className="h-5 w-5" /></button>
+                                <button onClick={() => { handleViewStudent(student); setIsEditing(true); }} className="text-indigo-600 hover:text-indigo-900 mr-3"><PencilIcon className="h-5 w-5" /></button>
+                                <button onClick={() => handleDeleteStudent(student.id || student.uid)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5" /></button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
 
@@ -492,6 +719,7 @@ const StudentManagement = () => {
           </div>
          )}
        </div>
+      </div>
 
       {/* Fixed Pagination at bottom (always shows 10 rows per page)
           Adjusted to avoid overlapping with a left sidebar.
@@ -525,6 +753,9 @@ const StudentManagement = () => {
               >
                 Next
               </button>
+
+              {/* Load more button for progressive backend pagination */}
+              
             </div>
           </div>
         </div>
