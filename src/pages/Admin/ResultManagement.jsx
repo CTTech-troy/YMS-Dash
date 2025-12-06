@@ -226,14 +226,14 @@ const ResultManagement = () => {
 
   // Filter results based on search query and filters
   const filteredResults = results.filter(result => {
-    const matchesSearch = (result.studentName || '').toLowerCase().includes(searchQuery.toLowerCase()) || (result.studentId || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesClass = filterClass ? result.class === filterClass : true;
+    const matchesSearch = (result.studentName || '').toLowerCase().includes(searchQuery.toLowerCase()) || (result.studentUid || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesClass = filterClass ? result.studentClass === filterClass : true;
     const matchesStatus = filterStatus ? result.status === filterStatus : true;
     return matchesSearch && matchesClass && matchesStatus;
   });
 
-  // Get unique classes for filter
-  const classes = [...new Set(results.map(result => result.class).filter(Boolean))];
+  // Get unique classes for filter (use studentClass from DB)
+  const classes = [...new Set(results.map(result => result.studentClass).filter(Boolean))];
   // Count pending results
   const pendingResultsCount = results.filter(result => result.status === 'pending').length;
 
@@ -299,15 +299,18 @@ const ResultManagement = () => {
           const data = JSON.parse(text || '[]');
           const mapped = (Array.isArray(data) ? data : []).map(r => ({
             id: r.id,
-            studentName: r.studentName || r.name || r.studentId || 'Unknown',
-            studentId: r.studentId || r.id || '',
-            class: r.class || r.className || '',
+            studentName: (r.studentName ?? r.name ?? r.fullName ?? r.studentUid) || 'Unknown',
+            studentUid: r.studentUid || r.id || '',
+            studentClass: r.studentClass || r.class || r.className || '',
             session: r.session || '',
             term: r.term || '',
             subjects: Array.isArray(r.subjects) ? r.subjects : [],
             teacherComment: r.teacherComment || '',
             principalComment: r.principalComment || '',
-            status: (r.published === 'yes') ? 'published' : (r.published === 'no' ? 'pending' : (r.status || 'pending')),
+            // normalized publish -> status
+            published: r.published ?? 'no',
+            status: (r.published === 'yes' || r.published === 'published') ? 'published' : 'pending',
+            createdAt: r.createdAt || r.publishedAt || r.updatedAt || '',
             lastUpdated: r.publishedAt || r.updatedAt || r.createdAt || '',
             picture: r.picture || ''
           }));
@@ -445,24 +448,26 @@ const ResultManagement = () => {
                 grade
               } = calculateOverallGrade(result.subjects);
               const isPublishing = publishingIds.includes(result.id);
+              const studentName = result.studentName || 'Unknown';
+              const studentUid = result.studentUid || result.studentUid || '';
               return <tr key={String(result.id)}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10">
+                        {/* <div className="flex-shrink-0 h-10 w-10">
                           <img className="h-10 w-10 rounded-full" src={result.picture} alt="" />
-                        </div>
+                        </div> */}
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">
-                            {result.studentName}
+                            {studentName}
                           </div>
                           <div className="text-sm text-gray-500">
-                            {result.studentId}
+                            {studentUid}
                           </div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {result.class}
+                      {result.studentClass}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
@@ -563,8 +568,9 @@ const ResultManagement = () => {
                 <div>
                   <div className="text-sm text-gray-500">Student</div>
                   <div className="text-xl font-semibold text-gray-900">{selectedResult.studentName}</div>
-                  <div className="text-sm text-gray-500">ID: {selectedResult.studentId}</div>
-                  <div className="text-sm text-gray-500">{selectedResult.class}</div>
+                  <div className="text-sm text-gray-500">ID: {selectedResult.studentUid}</div>
+                  <div className="text-sm text-gray-500">{selectedResult.studentClass}</div>
+                  <div className="text-sm text-gray-500">Created: {selectedResult.createdAt ? new Date(selectedResult.createdAt).toLocaleString() : '—'}</div>
                 </div>
               </div>
               <div className="text-right">

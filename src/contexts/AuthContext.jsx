@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { useEffect, useState, createContext, useContext } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { db } from "../../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import bcrypt from "bcryptjs";
+import api from '../api/axios'; // your axios instance
 
 const AuthContext = createContext(null);
 
@@ -204,3 +205,89 @@ export const AuthProvider = ({ children }) => {
 };
 
 export const useAuth = () => useContext(AuthContext);
+
+const AppContext = createContext(null);
+
+export const AppProvider = ({ children, user }) => {
+  const [data, setData] = useState({
+    students: [],
+    results: [],
+    subjects: [],
+    loading: !!user,
+    error: null,
+    ts: null
+  });
+
+  const cacheKey = user ? `yms_app_cache_${user.uid || user.id}` : 'yms_app_cache_anon';
+
+  const saveCache = (payload) => {
+    try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+  };
+  const loadCache = () => {
+    try { const raw = localStorage.getItem(cacheKey); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+  const clearCache = () => {
+    try { localStorage.removeItem(cacheKey); } catch {}
+  };
+
+  const loadAll = useCallback(async (opts = { force: false }) => {
+    if (!user) return;
+    if (!opts.force) {
+      const cached = loadCache();
+      if (cached && cached.ts) {
+        setData({ ...cached, loading: false, error: null });
+      }
+    }
+
+    setData(d => ({ ...d, loading: true, error: null }));
+    try {
+      const [sRes, rRes, subRes] = await Promise.all([
+        api.get('/api/students'),
+        api.get('/api/results'),
+        api.get('/api/subjects')
+      ]);
+
+      const students = Array.isArray(sRes.data) ? sRes.data : (sRes.data?.students || sRes.data?.data || []);
+      const results = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.results || rRes.data?.data || []);
+      const subjects = Array.isArray(subRes.data) ? subRes.data : (subRes.data?.subjects || subRes.data?.data || []);
+
+      const payload = { students, results, subjects, loading: false, error: null, ts: Date.now() };
+      setData(payload);
+      saveCache(payload);
+      return payload;
+    } catch (err) {
+      console.error('AppProvider.loadAll error', err);
+      setData(d => ({ ...d, loading: false, error: err }));
+      return null;
+    }
+  }, [user, cacheKey]);
+
+  useEffect(() => {
+    if (!user) {
+      setData({ students: [], results: [], subjects: [], loading: false, error: null, ts: null });
+      // clear cache on logout
+      try {
+        Object.keys(localStorage).forEach(k => { if (k.startsWith('yms_app_cache_')) localStorage.removeItem(k); });
+      } catch {}
+      return;
+    }
+    // load once on login (show cached immediately, refresh in background)
+    loadAll({ force: false });
+  }, [user, loadAll]);
+
+  return (
+    <AppContext.Provider value={{
+      ...data,
+      reload: () => loadAll({ force: true }),
+      clearCache
+    }}>
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useAppData = () => {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useAppData must be used inside AppProvider');
+  return ctx;
+};

@@ -6,9 +6,19 @@ import { useAuth } from '../../contexts/AuthContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
 
-// (Removed local fallback sample STUDENTS_DATA — students come from the backend)
-
+/**
+ * TeacherClasses Component
+ * 
+ * Main component for managing teacher's class, students, subjects, and attendance.
+ * Supports two modes:
+ *   1. Teacher view: restricted to assigned class
+ *   2. Admin/Principal view: sees all classes and students
+ */
 const TeacherClasses = () => {
+  // ============================================================================
+  // STATE: Modal Controls
+  // ============================================================================
+  // Control visibility of mark attendance modal
   const [showMarkAttendanceModal, setShowMarkAttendanceModal] = useState(false);
   const [showStudentHistoryModal, setShowStudentHistoryModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -17,28 +27,79 @@ const TeacherClasses = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDateOption, setSelectedDateOption] = useState('today');
   const [activeTab, setActiveTab] = useState('students');
-  // Students will be loaded from the backend; start with an empty list
+
+  // ============================================================================
+  // STATE: Data from Backend
+  // ============================================================================
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(true);
-  // teacher assigned class (used to restrict Add Subject class)
-  const [assignedClass, setAssignedClass] = useState(null);
-  // admin/principal mode flag — when true display everything (no class filtering)
   const [isAdminView, setIsAdminView] = useState(false);
-  // results state (for admin view or per-class/per-teacher)
   const [results, setResults] = useState([]);
   const [resultsLoading, setResultsLoading] = useState(true);
+
+  // ============================================================================
+  // STATE: Subjects Management
+  // ============================================================================
+  // List of subjects for the assigned class
+  const [classSubjects, setClassSubjects] = useState([]);
+  // Control visibility of "add subject" modal
+  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
+  // Input field: new subject name
+  const [newSubjectName, setNewSubjectName] = useState('');
+  // Input field: new subject class
+  const [newSubjectClass, setNewSubjectClass] = useState('');
+  // Input field: new subject code (optional)
+  const [newSubjectCode, setNewSubjectCode] = useState('');
+  // Control visibility of subject details modal
+  const [showSubjectModal, setShowSubjectModal] = useState(false);
+  // Currently selected subject in modal
+  const [modalSubject, setModalSubject] = useState(null);
+  // Edit mode state for subject modal
+  const [isEditingSubject, setIsEditingSubject] = useState(false);
+  // Edit fields for subject name
+  const [editName, setEditName] = useState('');
+  // Edit fields for subject class
+  const [editClass, setEditClass] = useState('');
+  // Edit fields for subject code
+  const [editCode, setEditCode] = useState('');
+  // Animation state for modal enter/exit
+  const [modalAnimateIn, setModalAnimateIn] = useState(false);
+
+  // ============================================================================
+  // CONTEXT: Extract Current User Info
+  // ============================================================================
+  // Get auth context (useAuth provides currentUser/user)
   const auth = useAuth();
+  // Extract current user from auth context (try multiple paths for compatibility)
   const currentUser = auth?.currentUser || auth?.user || null;
+  // Get teacher/staff UID from auth or localStorage fallback
   const staffIdFromAuth = currentUser?.uid || currentUser?.id || localStorage.getItem('uid') || null;
+  // Get teacher/staff name from auth or localStorage fallback
   const staffNameFromAuth = currentUser?.displayName || currentUser?.name || localStorage.getItem('name') || null;
 
+  // ============================================================================
+  // API CONFIGURATION
+  // ============================================================================
+  // Base API URL (from .env or fallback to production URL)
   const API_BASE = (import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com').replace(/\/$/, '');
+  // Endpoint for subjects CRUD operations
   const SUBJECTS_BASE = `${API_BASE}/api/subjects`;
-  // students & teachers endpoints
+  // Endpoint for students list/crud
   const STUDENTS_BASE = `${API_BASE}/api/students`;
+  // Endpoint for teachers data
   const TEACHERS_BASE = `${API_BASE}/api/teachers`;
   
-  // Simple helper that always targets SUBJECTS_BASE (no root or other candidates)
+  // ============================================================================
+  // HELPER: Fetch Subjects with Error Handling
+  // ============================================================================
+  /**
+   * Fetch subjects from API with proper error handling.
+   * Ensures all requests go to SUBJECTS_BASE endpoint.
+   * 
+   * @param {string} pathSuffix - Additional path (e.g., "/:id")
+   * @param {object} fetchOptions - Fetch options (method, headers, body)
+   * @returns {object} { res, url } - Response object and URL used
+   */
   async function fetchSubjects(pathSuffix = '', fetchOptions) {
     const p = pathSuffix && !pathSuffix.startsWith('/') ? `/${pathSuffix}` : (pathSuffix || '');
     const url = `${SUBJECTS_BASE}${p}`;
@@ -59,160 +120,190 @@ const TeacherClasses = () => {
     }
   }
 
+  // ============================================================================
+  // EFFECT: Load Students from Backend on Mount
+  // ============================================================================
+  /**
+   * Main effect to load students when component mounts.
+   * 
+   * Process:
+   * 1. Extract teacher UID and assigned class from auth/localStorage
+   * 2. Detect if user is admin/principal (assignedClass === 'admin'/'principal'/etc)
+   * 3. Fetch teacher record to get accurate assignedClass
+   * 4. Query students API with class filter if teacher, or all students if admin
+   * 5. Normalize student data (lowercase class, handle image paths)
+   * 6. Filter students by class if teacher
+   * 7. Fetch results/grades for the class or teacher
+   */
+    // ============================================================================
+  // EFFECT: Load Students from Backend on Mount
+  // ============================================================================
   useEffect(() => {
     const loadStudentsForTeacher = async () => {
       setStudentsLoading(true);
-      // try to determine teacher UID and assigned class
-      const uid = staffIdFromAuth || localStorage.getItem('uid');
-      let assignedClass = currentUser?.assignedClass || localStorage.getItem('assignedClass') || null;
-      // normalize and detect admin/principal view (local var)
-      const acLower = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
-      const adminInitial = acLower === 'admin' || acLower === 'principal' || acLower === 'headmaster' || acLower === 'head';
-      // store normalized assignedClass for consistent matching/display
-      const normalizedAssignedClass = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
-      setAssignedClass(normalizedAssignedClass);
-      setIsAdminView(!!adminInitial);
-
-      if (uid) {
-        try {
-          // try common patterns: GET /api/teachers/:uid or query by uid
-          let tRes = await fetch(`${TEACHERS_BASE}/${encodeURIComponent(uid)}`);
-          if (!tRes.ok) {
-            tRes = await fetch(`${TEACHERS_BASE}?uid=${encodeURIComponent(uid)}`);
-          }
-          if (tRes.ok) {
-            const tData = await tRes.json();
-            const teacher = Array.isArray(tData) ? tData[0] : tData;
-            assignedClass = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClass || currentUser?.assignedClass;
-            // derive adminMode locally from the possibly-updated assignedClass
-            const acLower2 = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
-            const adminFromTeacher = acLower2 === 'admin' || acLower2 === 'principal' || acLower2 === 'headmaster' || acLower2 === 'head';
-            // normalize and persist assignedClass
-            const normalizedAssigned = acLower2;
-            setAssignedClass(normalizedAssigned);
-            setIsAdminView(!!adminFromTeacher);
-          }
-        } catch (err) {
-          console.error('Failed to fetch teacher assignment', err);
-        }
-      }
-
-      // derive adminMode for this run (use latest assignedClass value)
-      const adminMode = (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'admin'
-        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'principal'
-        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'headmaster'
-        || (assignedClass ? String(assignedClass).trim().toLowerCase() : '') === 'head';
-
-      // Try server-side class filter when we have an assignedClass to reduce payload
+      
       try {
-        let studentsData = [];
-        // If admin/principal view requested, fetch all students (don't attempt per-class queries)
-        if (adminMode) {
-          const sAllRes = await fetch(`${STUDENTS_BASE}`);
-          if (!sAllRes.ok) {
-            const body = await sAllRes.text().catch(() => null);
-            console.error('Students fetch failed', { url: `${STUDENTS_BASE}`, status: sAllRes.status, body });
-            throw new Error('Students fetch failed');
-          }
-          const raw = await sAllRes.json().catch(() => []);
-          studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
-        } else if (assignedClass) {
-          const enc = encodeURIComponent(assignedClass);
-          // Try primary query param name "class"
-          const tryUrls = [
-            `${STUDENTS_BASE}?class=${enc}`,
-            `${STUDENTS_BASE}?studentClass=${enc}`,
-            `${STUDENTS_BASE}?grade=${enc}`
-          ];
+        // Extract teacher UID (prefer auth, fallback to localStorage)
+        const uid = staffIdFromAuth || localStorage.getItem('uid');
+        let assignedClass = currentUser?.assignedClass || localStorage.getItem('assignedClass') || null;
+        
+        // Detect admin/principal mode from assignedClass string (DON'T TOUCH THIS)
+        const acLower = assignedClass ? String(assignedClass).trim().toLowerCase() : '';
+        const adminInitial = acLower === 'admin' || acLower === 'principal' || acLower === 'headmaster' || acLower === 'head';
+        
+        setIsAdminView(!!adminInitial);
 
-          let sRes = null;
-          for (const u of tryUrls) {
-            try {
-              sRes = await fetch(u);
-              if (sRes.ok) break;
-            } catch (e) {
-              console.warn('Students fetch attempt failed for', u, e);
+        // ========================================
+        // FETCH TEACHER RECORD TO GET ACCURATE assignedClass
+        // ========================================
+        if (uid && !adminInitial) {
+          try {
+            // Try endpoint: GET /api/teachers/:uid
+            let tRes = await fetch(`${TEACHERS_BASE}/${encodeURIComponent(uid)}`);
+            if (!tRes.ok) {
+              // Fallback: try query param: GET /api/teachers?uid=...
+              tRes = await fetch(`${TEACHERS_BASE}?uid=${encodeURIComponent(uid)}`);
             }
-          }
-
-          if (sRes && sRes.ok) {
-            studentsData = await sRes.json().catch(() => []);
-            // normalize response shape
-            studentsData = Array.isArray(studentsData) ? studentsData : (studentsData.students || studentsData.data || []);
-          } else {
-            // server did not support filtered query or all attempts failed — fall back to fetching all
-            const sAllRes = await fetch(`${STUDENTS_BASE}`);
-            if (!sAllRes.ok) {
-              const body = await sAllRes.text().catch(() => null);
-              console.error('Students fetch failed', { url: `${STUDENTS_BASE}`, status: sAllRes.status, body });
-              throw new Error('Students fetch failed');
+            if (tRes.ok) {
+              const tData = await tRes.json();
+              // Handle array response or single object
+              const teacher = Array.isArray(tData) ? tData[0] : tData;
+              // Update assignedClass from teacher record (try multiple field names)
+              assignedClass = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClass || currentUser?.assignedClass;
+              
+              console.debug('Fetched teacher record:', {
+                uid,
+                assignedClass,
+                teacher: teacher?.name || 'unknown'
+              });
             }
-            const raw = await sAllRes.json().catch(() => []);
-            studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
+          } catch (err) {
+            console.error('Failed to fetch teacher assignment', err);
           }
-        } else {
-          // No assignedClass — fetch all students
-          const sRes = await fetch(`${STUDENTS_BASE}`);
-          if (!sRes.ok) {
-            const body = await sRes.text().catch(() => null);
-            console.error('Students fetch failed', { studentsUrl: `${STUDENTS_BASE}`, status: sRes.status, body });
-            throw new Error('Students fetch failed');
-          }
-          const raw = await sRes.json().catch(() => []);
-          studentsData = Array.isArray(raw) ? raw : (raw.students || raw.data || []);
         }
 
-        // Normalize and log each student's detected class
-        // fast synchronous normalization (make UI responsive by setting minimal normalized data ASAP)
-        const normalized = studentsData.map(s => {
-          const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '').toString().trim().toLowerCase();
+        // Normalize assignedClass for comparison
+        const normalizedAssignedClass = assignedClass 
+          ? String(assignedClass).trim().toLowerCase().replace(/\s+/g, ' ')
+          : '';
+
+        // Determine admin mode after getting accurate assignedClass (DON'T TOUCH THIS)
+        const adminMode = normalizedAssignedClass === 'admin'
+          || normalizedAssignedClass === 'principal'
+          || normalizedAssignedClass === 'headmaster'
+          || normalizedAssignedClass === 'head';
+
+        setAssignedClass(normalizedAssignedClass);
+        setIsAdminView(!!adminMode);
+
+        // ========================================
+        // FETCH ALL STUDENTS FROM API (10 per load, cursor pagination)
+        // ========================================
+        let allStudents = [];
+        let nextToken = null;
+        let hasMore = true;
+
+        try {
+          while (hasMore) {
+            let url = `${STUDENTS_BASE}?limit=10`;
+            if (nextToken) {
+              url += `&startAfter=${encodeURIComponent(nextToken)}`;
+            }
+
+            const sRes = await fetch(url);
+            if (!sRes.ok) {
+              console.error('Students fetch failed', { status: sRes.status, url });
+              break; // stop pagination on error
+            }
+
+            const raw = await sRes.json().catch(() => null);
+            const pageData = raw?.data || [];
+            
+            if (Array.isArray(pageData) && pageData.length > 0) {
+              allStudents = allStudents.concat(pageData);
+              console.debug('Loaded page of students:', {
+                pageCount: pageData.length,
+                totalSoFar: allStudents.length
+              });
+            }
+
+            nextToken = raw?.nextPageToken || null;
+            hasMore = raw?.hasMore === true;
+          }
+
+          console.debug('Fetched all students from API:', {
+            totalCount: allStudents.length,
+            endpoint: STUDENTS_BASE
+          });
+        } catch (err) {
+          console.error('Network error fetching students', err);
+          toast.error('Could not load students from server. Please try again later.');
+          setStudentsLoading(false);
+          return;
+        }
+
+        // ========================================
+        // NORMALIZE STUDENTS DATA
+        // ========================================
+        const normalized = allStudents.map(s => {
+          const detectedClass = (s.class || s.studentClass || s.className || s.grade || s.classroom || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+        
           return {
             raw: s,
             id: s.id || s._id || s.studentId || Math.random().toString(36).slice(2, 9),
             name: s.name || s.fullName || s.studentName || 'Unnamed',
             uid: s.uid || s.studentUid || s.studentId || '',
-            // store normalized class (lowercase trimmed) for consistent matching
-            class: detectedClass || (assignedClass || '').toString().trim().toLowerCase(),
-            picture: s.picture || s.avatar || '/placeholder-avatar.png',
+            class: detectedClass,
+            picture: s.picture || s.avatar || '',
             attendance: s.attendance || { present: 0, absent: 0, total: 0, history: [] }
           };
         });
 
-        // log normalized values for debugging
-        // debugging log removed for performance
-
-        // set students quickly to render normalized data immediately
         setStudents(normalized);
 
-        // If adminMode => include all; else if assignedClass => filter by class
-        const finalList = adminMode
-          ? normalized
-          : (assignedClass ? normalized.filter(st => String(st.class).toLowerCase() === String(assignedClass).toLowerCase()) : normalized);
-
-        if (!adminMode && assignedClass && finalList.length === 0) {
-          console.warn(`No students matched assigned class "${assignedClass}" after server-side attempt`);
-          toast.info(`No students found for ${assignedClass}`);
+        // ========================================
+        // FILTER BY TEACHER'S CLASS (if not admin)
+        // ========================================
+        let finalList = [];
+        
+        if (adminMode) {
+          finalList = normalized;
+          console.debug('Admin mode: showing all students', { count: finalList.length });
+        } else if (normalizedAssignedClass) {
+          finalList = normalized.filter(student => student.class === normalizedAssignedClass);
+          console.debug('Teacher mode: filtered students', {
+            teacherClass: normalizedAssignedClass,
+            matchedCount: finalList.length
+          });
+        } else {
+          finalList = normalized;
         }
 
-        // update students with the final filtered list (fast set above ensures UI already had normalized data)
         setStudents(finalList);
-        // fetch results after students loaded (admin => all results)
+
+        // ========================================
+        // FETCH RESULTS/GRADES
+        // ========================================
         try {
           setResultsLoading(true);
           const RESULTS_BASE = `${API_BASE}/api/results`;
           let rUrl = RESULTS_BASE;
+          
           if (!adminMode) {
-            // try to fetch results for assignedClass first, else teacher
-            if (assignedClass) rUrl = `${RESULTS_BASE}?class=${encodeURIComponent(assignedClass)}`;
+            if (normalizedAssignedClass) rUrl = `${RESULTS_BASE}?class=${encodeURIComponent(normalizedAssignedClass)}`;
             else if (staffIdFromAuth) rUrl = `${RESULTS_BASE}?teacherUid=${encodeURIComponent(staffIdFromAuth)}`;
           }
+          
           const rRes = await fetch(rUrl);
           if (rRes.ok) {
             const rRaw = await rRes.json().catch(() => []);
             const rArr = Array.isArray(rRaw) ? rRaw : (rRaw.data || rRaw.results || []);
             setResults(rArr);
           } else {
-            // fallback: fetch all results if filtered request failed
             const rf = await fetch(RESULTS_BASE);
             if (rf.ok) {
               const rr = await rf.json().catch(() => []);
@@ -228,29 +319,37 @@ const TeacherClasses = () => {
           setResultsLoading(false);
         }
       } catch (err) {
-        console.error('Network error fetching students', err);
+        console.error('Unexpected error in loadStudentsForTeacher', err);
         setStudents([]);
-        toast.error('Could not load students from server. Please try again later.');
+        toast.error('An unexpected error occurred. Please try again.');
       } finally {
         setStudentsLoading(false);
       }
     };
 
     loadStudentsForTeacher();
-  }, [STUDENTS_BASE, TEACHERS_BASE]);
+  }, [STUDENTS_BASE, TEACHERS_BASE, staffIdFromAuth, currentUser?.assignedClass]);
 
-  const [classSubjects, setClassSubjects] = useState([]);
-  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
-  const [newSubjectName, setNewSubjectName] = useState('');
-  const [newSubjectClass, setNewSubjectClass] = useState('');
-  const [newSubjectCode, setNewSubjectCode] = useState('');
-
+  // ============================================================================
+  // EFFECT: Load Subjects on Mount
+  // ============================================================================
+  /**
+   * Fetch subjects from API on component mount.
+   * 
+   * Process:
+   * 1. Call fetchSubjects() to get all subjects
+   * 2. Normalize subject fields (subjectName, subjectClass, etc.)
+   * 3. Filter subjects by assigned class if teacher
+   * 4. Show all subjects if admin
+   */
   useEffect(() => {
     const load = async () => {
       try {
         const { res, url } = await fetchSubjects('');
         console.debug('Got subjects from', url);
         const data = await res.json();
+        
+        // Map API response to consistent subject shape
         const mapped = (Array.isArray(data) ? data : []).map(s => ({
           id: s.id || s._id || s.classId,
           name: s.subjectName || s.name || 'Unnamed Subject',
@@ -260,8 +359,12 @@ const TeacherClasses = () => {
           teachersName: s.teachersName || s.teacherName || null,
           teacherUid: s.teacherUid || null
         }));
-        // If admin/principal, show all subjects; otherwise restrict to assigned class when present
-        const visible = isAdminView ? mapped : (assignedClass ? mapped.filter(m => String(m.class).trim() === String(assignedClass).trim()) : mapped);
+        
+        // Filter subjects: show all if admin, else restrict to assigned class
+        const visible = isAdminView 
+          ? mapped 
+          : (assignedClass ? mapped.filter(m => String(m.class).trim() === String(assignedClass).trim()) : mapped);
+        
         setClassSubjects(visible);
       } catch (err) {
         console.error('Failed to load subjects', err);
@@ -271,8 +374,16 @@ const TeacherClasses = () => {
     load();
   }, [SUBJECTS_BASE, assignedClass, isAdminView]);
 
-  // Initialize attendance when opening modal
+  // ============================================================================
+  // HANDLER: Open Attendance Modal
+  // ============================================================================
+  /**
+   * Initialize attendance modal when "Mark Attendance" button is clicked.
+   * 
+   * Sets all students to "present" by default, then shows modal.
+   */
   const handleOpenAttendanceModal = () => {
+    // Initialize attendance: all students present by default
     const initialAttendance = {};
     students.forEach(student => {
       initialAttendance[student.id] = true;
@@ -283,7 +394,13 @@ const TeacherClasses = () => {
     setShowMarkAttendanceModal(true);
   };
 
-  // Toggle attendance for a student
+  // ============================================================================
+  // HANDLER: Toggle Student Attendance
+  // ============================================================================
+  /**
+   * Toggle attendance status for a single student.
+   * Flips the boolean value for the given student ID.
+   */
   const toggleAttendance = studentId => {
     setAttendance(prev => ({
       ...prev,
@@ -291,49 +408,96 @@ const TeacherClasses = () => {
     }));
   };
 
-  // Handle date option change
+  // ============================================================================
+  // HANDLER: Change Attendance Date
+  // ============================================================================
+  /**
+   * Handle date option change in attendance modal.
+   * 
+   * Updates attendanceDate based on selected option:
+   * - 'today': use current date
+   * - 'yesterday': use yesterday's date
+   * - 'custom': keep current selected date (user can input manually)
+   */
   const handleDateOptionChange = option => {
     setSelectedDateOption(option);
     let date = new Date();
     if (option === 'yesterday') {
       date.setDate(date.getDate() - 1);
     } else if (option === 'custom') {
-      // Keep the current selected date
+      // Keep the current selected date, don't auto-update
       return;
     }
     setAttendanceDate(date.toISOString().split('T')[0]);
   };
 
-  // Save attendance
+  // ============================================================================
+  // HANDLER: Save Attendance
+  // ============================================================================
+  /**
+   * Save attendance to backend (currently just shows success toast).
+   * In production, this would POST attendance data to an API endpoint.
+   */
   const handleSaveAttendance = () => {
     // In a real application, this would save to a database
     toast.success('Attendance saved successfully!');
     setShowMarkAttendanceModal(false);
   };
 
-  // View student attendance history
+  // ============================================================================
+  // HANDLER: View Student History
+  // ============================================================================
+  /**
+   * Open student history/details modal for a specific student.
+   */
   const handleViewStudentHistory = student => {
     setSelectedStudent(student);
     setShowStudentHistoryModal(true);
   };
 
-  // Filter students based on search query
+  // ============================================================================
+  // COMPUTED: Filter Students by Search Query
+  // ============================================================================
+  /**
+   * Filter students list by search query (name or student ID).
+   * Case-insensitive partial matching.
+   */
   const filteredStudents = students.filter(
     student =>
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       student.uid.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // ============================================================================
+  // HANDLER: Open Add Subject Modal
+  // ============================================================================
+  /**
+   * Initialize and open "Add Subject" modal.
+   * Default subject class to teacher's assigned class.
+   */
   const handleOpenAddSubject = () => {
     setNewSubjectName('');
-    // default the subject class to the teacher's assigned class
+    // Auto-fill subject class with teacher's assigned class
     setNewSubjectClass(assignedClass || '');
     setNewSubjectCode('');
     setShowAddSubjectModal(true);
   };
 
-  // Generate a short deterministic course code from subject name + class
+  // ============================================================================
+  // HELPER: Generate Auto Course Code
+  // ============================================================================
+  /**
+   * Generate a short deterministic course code from subject name + class.
+   * 
+   * Format: {3-letter initials}-{class code}-{timestamp suffix}
+   * Example: "ENG-JSS1-A2B3"
+   * 
+   * @param {string} name - Subject name
+   * @param {string} klass - Class name
+   * @returns {string} Generated course code
+   */
   function generateCourseCode(name = '', klass = '') {
+    // Remove non-alphanumeric characters and convert to uppercase
     const clean = str =>
       String(str || '')
         .toUpperCase()
@@ -341,33 +505,49 @@ const TeacherClasses = () => {
         .trim();
     const n = clean(name);
     const k = clean(klass);
-    // take initials from name (max 3 letters)
+    
+    // Extract initials from subject name (max 3 letters)
     const initials = n
       .split(/\s+/)
       .filter(Boolean)
       .map(w => w[0])
       .slice(0, 3)
       .join('');
-    // take class shorthand (letters + digits)
+    
+    // Extract class code (alphanumeric characters, max 4)
     const classCode = (k.match(/[A-Z0-9]+/g) || []).join('').slice(0, 4);
-    // append short timestamp suffix for uniqueness
+    
+    // Add short timestamp suffix for uniqueness
     const suffix = String(Date.now()).slice(-4);
+    
     return `${initials || 'SUB'}-${classCode || 'CLS'}-${suffix}`;
   }
 
+  // ============================================================================
+  // HANDLER: Add New Subject
+  // ============================================================================
+  /**
+   * Create a new subject via API and add to local state.
+   * 
+   * Validates input, sends POST request to /api/subjects, and updates UI.
+   * Only adds to local list if subject class matches teacher's assigned class (or if admin).
+   */
   const handleAddSubject = async () => {
     const name = newSubjectName.trim();
     const klass = newSubjectClass.trim();
     const code = newSubjectCode.trim();
+    
+    // Validation
     if (!name) return toast.error('Please enter a subject name');
     if (!klass) return toast.error('Please select a class');
 
+    // Build request payload with teacher/staff identity
     const payload = {
       subjectName: name,
-      // ensure we submit the teacher's assigned class (server expects subjectClass)
+      // Ensure we submit the teacher's assigned class
       subjectClass: assignedClass || klass,
       subjectCode: code || null,
-      // attach current staff identity (prefer localStorage, fallback to userRecord)
+      // Attach current staff identity
       teacherUid: staffIdFromAuth || localStorage.getItem('uid') || null,
       teacherImg: currentUser?.photoURL || localStorage.getItem('img') || null,
       teachersName: staffNameFromAuth || localStorage.getItem('name') || null,
@@ -376,13 +556,15 @@ const TeacherClasses = () => {
     };
 
     try {
+      // POST to /api/subjects
       const { res } = await fetchSubjects('', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       const created = await res.json();
-      // Only add to local list if it belongs to the teacher's assigned class
+      
+      // Build new subject entry from response
       const newEntry = {
         id: created.id || created._id || (classSubjects.length ? Math.max(...classSubjects.map(s => s.id)) + 1 : 1),
         name: created.subjectName || name,
@@ -393,9 +575,12 @@ const TeacherClasses = () => {
         staffId: created.staffId || payload.staffId,
         staffName: created.staffName || payload.staffName
       };
+      
+      // Only add to local list if it belongs to teacher's assigned class
       if (!assignedClass || String(newEntry.class).trim() === String(assignedClass).trim()) {
         setClassSubjects(prev => [...prev, newEntry]);
       }
+      
       toast.success('Subject added');
       setShowAddSubjectModal(false);
     } catch (err) {
@@ -404,19 +589,14 @@ const TeacherClasses = () => {
     }
   };
 
-  // View details modal state
-  const [showSubjectModal, setShowSubjectModal] = useState(false);
-  const [modalSubject, setModalSubject] = useState(null);
-
-  // Edit fields inside modal
-  const [isEditingSubject, setIsEditingSubject] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editClass, setEditClass] = useState('');
-  const [editCode, setEditCode] = useState('');
-
-  // modal animation flag
-  const [modalAnimateIn, setModalAnimateIn] = useState(false);
-
+  // ============================================================================
+  // HANDLER: Open Subject Details Modal
+  // ============================================================================
+  /**
+   * Open modal to view/edit subject details.
+   * Initialize edit fields from subject data.
+   * Trigger animation on open.
+   */
   const handleOpenSubjectModal = subject => {
     setModalSubject(subject);
     setEditName(subject.subjectName || subject.name || '');
@@ -424,13 +604,20 @@ const TeacherClasses = () => {
     setEditCode(subject.subjectCode || subject.code || '');
     setIsEditingSubject(false);
     setShowSubjectModal(true);
-    // trigger enter animation after render
+    // Trigger enter animation after render
     setModalAnimateIn(false);
     setTimeout(() => setModalAnimateIn(true), 10);
   };
 
+  // ============================================================================
+  // HANDLER: Close Subject Details Modal
+  // ============================================================================
+  /**
+   * Close subject modal with exit animation.
+   * Resets all modal state.
+   */
   const handleCloseSubjectModal = () => {
-    // play exit animation then close
+    // Play exit animation then close
     setModalAnimateIn(false);
     setTimeout(() => {
       setModalSubject(null);
@@ -439,12 +626,26 @@ const TeacherClasses = () => {
     }, 180);
   };
 
+  // ============================================================================
+  // HANDLER: Start Edit Mode in Subject Modal
+  // ============================================================================
+  /**
+   * Switch subject modal to edit mode.
+   * Allows user to modify subject fields.
+   */
   const handleStartEdit = () => {
     setIsEditingSubject(true);
   };
 
+  // ============================================================================
+  // HANDLER: Cancel Subject Edit
+  // ============================================================================
+  /**
+   * Cancel subject editing and revert changes.
+   * Resets edit fields to original values.
+   */
   const handleCancelEdit = () => {
-    // reset edits to original values
+    // Reset edits to original values
     if (modalSubject) {
       setEditName(modalSubject.subjectName || modalSubject.name || '');
       setEditClass(modalSubject.subjectClass || modalSubject.class || '');
@@ -453,12 +654,19 @@ const TeacherClasses = () => {
     setIsEditingSubject(false);
   };
 
+  // ============================================================================
+  // HANDLER: Delete Subject
+  // ============================================================================
+  /**
+   * Delete a subject via API (DELETE /api/subjects/:id).
+   * Remove from local state on success.
+   */
   const handleDeleteSubject = async (id) => {
     if (!id) return;
     try {
-      // delete endpoint: DELETE /api/subjects/:id
       const { res } = await fetchSubjects(`/${id}`, { method: 'DELETE' });
       if (res.ok) {
+        // Remove from local state
         setClassSubjects(prev => prev.filter(s => String(s.id) !== String(id)));
         toast.success('Subject deleted');
         handleCloseSubjectModal();
@@ -473,27 +681,42 @@ const TeacherClasses = () => {
     }
   };
 
+  // ============================================================================
+  // HANDLER: Save Subject Changes
+  // ============================================================================
+  /**
+   * Update a subject via API (PUT /api/subjects/:id).
+   * Update local state and modal on success.
+   */
   const handleSaveSubject = async () => {
     if (!modalSubject) return;
     const id = modalSubject.id;
+    
+    // Build update payload
     const payload = {
       subjectName: editName.trim(),
       subjectClass: editClass.trim(),
       subjectCode: editCode.trim() || null
     };
+    
     try {
+      // PUT to /api/subjects/:id
       const { res } = await fetchSubjects(`/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      
       if (!res.ok) {
         const body = await res.text().catch(() => null);
         console.error('Update failed', body);
         toast.error('Could not update subject');
         return;
       }
+      
       const updated = await res.json();
+      
+      // Update local subjects list
       setClassSubjects(prev => prev.map(s => (String(s.id) === String(id) ? {
         id: updated.id || id,
         name: updated.subjectName || payload.subjectName,
@@ -501,8 +724,9 @@ const TeacherClasses = () => {
         subjectCode: updated.subjectCode || payload.subjectCode,
         teacherUid: updated.teacherUid || s.teacherUid
       } : s)));
+      
       toast.success('Subject updated');
-      // refresh modal content
+      // Refresh modal content
       setModalSubject(prev => ({ ...prev, ...updated }));
       setIsEditingSubject(false);
     } catch (err) {
@@ -511,37 +735,47 @@ const TeacherClasses = () => {
     }
   };
 
-  // Improved image source helper:
-  // Handles:
-  // - data URI strings
-  // - absolute URLs (http(s):// or site-relative '/...')
-  // - raw base64 strings (converted to data URI)
-  // - objects like { data: <base64|string|Array>, type }, { base64: '...' }, { buffer: { data: [...] } } (common from Mongo)
-  // - Uint8Array / ArrayBuffer -> object URL
-  // - falsy -> default avatar
+  // ============================================================================
+  // HELPER: Convert Image to Display Source
+  // ============================================================================
+  /**
+   * Convert various image formats to displayable src.
+   * Handles:
+   * - data: URIs (already formatted)
+   * - HTTP(S) URLs or site-relative paths
+   * - Raw base64 strings (converts to data: URI)
+   * - Objects with base64/data fields
+   * - Mongo/Mongoose Buffer objects
+   * - Uint8Array/ArrayBuffer (converts to object URL)
+   * - Null/falsy values (returns default avatar)
+   * 
+   * @param {*} input - Image data in various formats
+   * @param {string} mimeGuess - MIME type guess (default 'jpeg')
+   * @returns {string} Valid image src URL
+   */
   function getImageSrc(input, mimeGuess = 'jpeg') {
     if (input == null) return '/images/default-avatar.png';
 
-    // If input is a string: data:, URL, or raw base64
+    // Handle string input
     if (typeof input === 'string') {
       const s = input.trim();
       if (!s) return '/images/default-avatar.png';
-      if (s.startsWith('data:')) return s;
-      if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
-      // raw base64 (no data: prefix)
+      if (s.startsWith('data:')) return s;  // Already a data: URI
+      if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;  // HTTP URL or site-relative path
+      // Raw base64 string (no data: prefix) — convert to data: URI
       if (/^[A-Za-z0-9+/=\s]+$/.test(s) && s.length > 50) {
         return `data:image/${mimeGuess};base64,${s}`;
       }
       return s;
     }
 
-    // If input is an object, try common shapes
+    // Handle object input
     if (typeof input === 'object') {
-      // Already a URL-like field
+      // Check for URL-like fields
       if (typeof input.src === 'string' && input.src.trim()) return getImageSrc(input.src, mimeGuess);
       if (typeof input.url === 'string' && input.url.trim()) return getImageSrc(input.url, mimeGuess);
 
-      // { base64: '...' } or { data: '...' }
+      // Check for { base64: '...' } or { data: '...' }
       if (typeof input.base64 === 'string' && input.base64.trim()) {
         const s = input.base64.trim();
         return s.startsWith('data:') ? s : `data:image/${mimeGuess};base64,${s}`;
@@ -563,28 +797,35 @@ const TeacherClasses = () => {
         }
       }
 
-      // If input is already an ArrayBuffer/TypedArray nested inside object
+      // Handle Uint8Array or ArrayBuffer
       if (input instanceof Uint8Array || input instanceof ArrayBuffer) {
-        const blob = input instanceof ArrayBuffer ? new Blob([input], { type: `image/${mimeGuess}` }) : new Blob([input.buffer || input], { type: `image/${mimeGuess}` });
+        const blob = input instanceof ArrayBuffer 
+          ? new Blob([input], { type: `image/${mimeGuess}` }) 
+          : new Blob([input.buffer || input], { type: `image/${mimeGuess}` });
         return URL.createObjectURL(blob);
       }
     }
 
-    // fallback
+    // Fallback
     return '/images/default-avatar.png';
   }
   
+  // ============================================================================
+  // RENDER: Main Component JSX
+  // ============================================================================
   return (
     <DashboardLayout title="My Classes">
+      {/* Header with class name and description */}
       <div className="mb-6 min-w-0">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-gray-900 truncate whitespace-nowrap">{assignedClass || 'My Class'}</h1>
         <p className="mt-1 text-xs sm:text-sm text-gray-500 truncate whitespace-nowrap max-w-[36rem]">Manage your class, students</p>
       </div>
 
-      {/* Tabs */}
+      {/* Tab Navigation: Students | Subjects */}
       <div className="mb-6 border-b border-gray-200">
         <div className="overflow-x-auto">
           <nav className="-mb-px flex space-x-8 min-w-0">
+            {/* Students Tab */}
             <button
               onClick={() => setActiveTab('students')}
               className={`${
@@ -593,6 +834,7 @@ const TeacherClasses = () => {
             >
               Students
             </button>
+            {/* Subjects Tab */}
             <button
               onClick={() => setActiveTab('subjects')}
               className={`${
@@ -601,16 +843,17 @@ const TeacherClasses = () => {
             >
               Subjects
             </button>
-            
           </nav>
         </div>
       </div>
 
+      {/* TAB: Students */}
       {activeTab === 'students' && (
         <>
-          {/* Search */}
+          {/* Search Bar + Total Count */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 min-w-0">
+              {/* Search Input */}
               <div className="w-full sm:w-96 min-w-0">
                 <label htmlFor="search" className="sr-only">
                   Search
@@ -636,6 +879,8 @@ const TeacherClasses = () => {
                   />
                 </div>
               </div>
+              
+              {/* Total Students Count */}
               <div className="flex items-center space-x-4 min-w-0">
                 <div className="text-sm text-gray-700 truncate whitespace-nowrap flex items-center gap-2">
                   <span className="font-medium">Total Students:</span>
@@ -651,7 +896,6 @@ const TeacherClasses = () => {
                     <span className="inline-block ml-1 font-semibold">{students.length}</span>
                   )}
                 </div>
-                
               </div>
             </div>
           </div>
@@ -663,7 +907,7 @@ const TeacherClasses = () => {
             </div>
             <ul className="divide-y divide-gray-200">
               {studentsLoading ? (
-                // lightweight skeleton rows for fast perceived load
+                // Show skeleton loaders while loading
                 Array.from({ length: 6 }).map((_, i) => (
                   <li key={i} className="px-6 py-4">
                     <div className="flex items-center justify-between min-w-0">
@@ -679,13 +923,16 @@ const TeacherClasses = () => {
                 ))
               ) : (
                 <>
+                  {/* Display filtered students list */}
                   {filteredStudents.map(student => (
                     <li key={student.id} className="px-6 py-4">
                       <div className="flex items-center justify-between min-w-0">
                         <div className="flex items-center min-w-0">
+                          {/* Student Avatar */}
                           <div className="flex-shrink-0 h-10 w-10">
                             <img className="h-10 w-10 rounded-full object-cover" src={getImageSrc(student.picture)} alt="" />
                           </div>
+                          {/* Student Name and UID */}
                           <div className="ml-4 min-w-0">
                             <div className="text-sm font-medium text-gray-900 truncate whitespace-nowrap max-w-[14rem] sm:max-w-[20rem]">{student.name}</div>
                             <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[10rem]">{student.uid}</div>
@@ -694,6 +941,7 @@ const TeacherClasses = () => {
                       </div>
                     </li>
                   ))}
+                  {/* Empty state when no students match search */}
                   {filteredStudents.length === 0 && (
                     <li className="px-6 py-4 text-center text-gray-500">No students found matching your search.</li>
                   )}
@@ -704,17 +952,21 @@ const TeacherClasses = () => {
         </>
       )}
 
+      {/* TAB: Subjects */}
       {activeTab === 'subjects' && (
         <div className="bg-white shadow rounded-lg overflow-hidden">
+          {/* Header with title and Add button */}
           <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
             <div className="min-w-0">
               <h2 className="text-lg sm:text-xl font-medium text-gray-900 truncate whitespace-nowrap">Class Subjects</h2>
             </div>
             <div className="flex items-center space-x-3 shrink-0">
+              {/* Total Subjects Count */}
               <div className="text-sm text-gray-700 truncate whitespace-nowrap">
                 <span className="font-medium">Total Subjects:</span>{' '}
                 <span className="inline-block ml-1 font-semibold">{classSubjects?.length ?? 0}</span>
               </div>
+              {/* Add Subject Button */}
               <button
                 onClick={handleOpenAddSubject}
                 className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -725,10 +977,12 @@ const TeacherClasses = () => {
             </div>
           </div>
 
+          {/* Subjects List */}
           <ul className="divide-y divide-gray-200">
             {classSubjects.map(subject => (
               <li key={subject.id} className="px-6 py-4">
                 <div className="flex items-center justify-between">
+                  {/* Subject Icon and Details */}
                   <div className="flex items-center">
                     <div className="flex-shrink-0">
                       <BookOpenIcon className="h-6 w-6 text-blue-500" />
@@ -738,6 +992,7 @@ const TeacherClasses = () => {
                       {subject.class && <div className="text-sm text-gray-500 truncate whitespace-nowrap max-w-[18rem]">{subject.class}{subject.subjectCode ? ` • ${subject.subjectCode}` : ''}</div>}
                     </div>
                   </div>
+                  {/* View Details Button */}
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleOpenSubjectModal(subject)}
@@ -754,7 +1009,9 @@ const TeacherClasses = () => {
           {/* Subject Details Modal */}
           {showSubjectModal && modalSubject && (
             <div className="fixed inset-0 z-50 flex items-center justify-center">
+              {/* Modal Backdrop */}
               <div className="absolute inset-0 bg-black opacity-50" onClick={handleCloseSubjectModal} />
+              {/* Modal Content */}
               <div
                 className={
                   `relative bg-white rounded-lg shadow-lg w-full max-w-lg p-6 z-10 transform transition-all duration-180 ease-out ` +
@@ -763,6 +1020,7 @@ const TeacherClasses = () => {
                 role="dialog"
                 aria-modal="true"
               >
+                {/* Modal Header */}
                 <div className="flex items-start space-x-4 min-w-0">
                   <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-semibold truncate whitespace-nowrap">{modalSubject.subjectName || modalSubject.name}</h3>
@@ -770,8 +1028,8 @@ const TeacherClasses = () => {
                   </div>
                 </div>
                 <div className="mt-4" />
-                {/* Title removed — details appear below */}
-                {/* view mode or edit mode */}
+                
+                {/* View Mode: Display subject details */}
                 {!isEditingSubject ? (
                   <div className="text-sm text-gray-800 space-y-2">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -794,6 +1052,7 @@ const TeacherClasses = () => {
                     </div>
                   </div>
                 ) : (
+                  /* Edit Mode: Allow editing subject fields */
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-600">Name</label>
@@ -810,6 +1069,7 @@ const TeacherClasses = () => {
                   </div>
                 )}
 
+                {/* Modal Footer: Action Buttons */}
                 <div className="mt-6 flex justify-end space-x-2">
                   {!isEditingSubject ? (
                     <>
@@ -855,91 +1115,100 @@ const TeacherClasses = () => {
         </div>
       )}
 
-      {activeTab === 'attendance' && (
-        <>
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-medium text-gray-900">Attendance Management</h2>
-            <button
-              type="button"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              onClick={handleOpenAttendanceModal}
-            >
-              <ClipboardListIcon className="h-5 w-5 mr-2" />
-              Mark Today's Attendance
-            </button>
-          </div>
-
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">Attendance Summary</h3>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <h4 className="text-sm font-medium text-green-800">Present Today</h4>
-                  <p className="mt-2 text-2xl font-bold text-green-700">23</p>
-                  <p className="mt-1 text-sm text-green-600">92% of total students</p>
-                </div>
-                <div className="bg-red-50 p-4 rounded-lg border border-red-200">
-                  <h4 className="text-sm font-medium text-red-800">Absent Today</h4>
-                  <p className="mt-2 text-2xl font-bold text-red-700">2</p>
-                  <p className="mt-1 text-sm text-red-600">8% of total students</p>
-                </div>
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <h4 className="text-sm font-medium text-blue-800">Average Attendance</h4>
-                  <p className="mt-2 text-2xl font-bold text-blue-700">94%</p>
-                  <p className="mt-1 text-sm text-blue-600">This month</p>
-                </div>
+      {/* Add Subject Modal */}
+      {showAddSubjectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowAddSubjectModal(false)} />
+          {/* Modal */}
+          <div
+            className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-subject-title"
+          >
+            <div className="px-6 pt-6 pb-4">
+              <h3 id="add-subject-title" className="text-lg font-medium text-gray-900">
+                Add Subject
+              </h3>
+              
+              {/* Class Selection */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">Class</label>
+                <select
+                  value={newSubjectClass}
+                  onChange={e => setNewSubjectClass(e.target.value)}
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 bg-white"
+                  disabled={Boolean(assignedClass)}
+                >
+                  {!assignedClass ? (
+                    <>
+                      <option value="">Select class</option>
+                      <option>Creche</option>
+                      <option>KG 1</option>
+                      <option>KG 2</option>
+                      <option>Nursery 2</option>
+                      <option>Basic 1</option>
+                      <option>Basic 2</option>
+                      <option>Basic 3</option>
+                      <option>Basic 4</option>
+                      <option>Basic 6</option>
+                      <option>JSS 1</option>
+                      <option>JSS 2</option>
+                    </>
+                  ) : (
+                    <option value={assignedClass}>{assignedClass}</option>
+                  )}
+                </select>
               </div>
 
-              <div className="mt-8">
-                <h4 className="text-sm font-medium text-gray-700 mb-4">Recent Attendance Records</h4>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Present</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Absent</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {[
-                        { date: '2023-06-05', present: 24, absent: 1, rate: '96%' },
-                        { date: '2023-06-04', present: 23, absent: 2, rate: '92%' },
-                        { date: '2023-06-03', present: 25, absent: 0, rate: '100%' },
-                        { date: '2023-06-02', present: 24, absent: 1, rate: '96%' },
-                        { date: '2023-06-01', present: 22, absent: 3, rate: '88%' }
-                      ].map((record, index) => (
-                        <tr key={index}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {new Date(record.date).toLocaleDateString('en-US', {
-                              weekday: 'long',
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric'
-                            })}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">{record.present}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">{record.absent}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{record.rate}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button className="text-blue-600 hover:text-blue-900">View Details</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              {/* Subject Name Input */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">Subject Name</label>
+                <input
+                  type="text"
+                  value={newSubjectName}
+                  onChange={e => setNewSubjectName(e.target.value)}
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"
+                  placeholder="e.g. Computer Studies"
+                  autoFocus
+                />
+              </div>
+
+              {/* Subject Code Input (Optional) */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">Subject Code (optional)</label>
+                <input
+                  type="text"
+                  value={newSubjectCode}
+                  onChange={e => setNewSubjectCode(e.target.value)}
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"
+                  placeholder="e.g. BASIC-SCI-JSS1"
+                />
+                {/* Show auto-generated code preview when input is empty */}
+                {!newSubjectCode && newSubjectName && newSubjectClass && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    Auto-generated code: <span className="font-medium">{generateCourseCode(newSubjectName, newSubjectClass)}</span>
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Modal Footer: Action Buttons */}
+            <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-2">
+              <button type="button" onClick={() => setShowAddSubjectModal(false)} className="px-4 py-2 rounded border bg-white">
+                Cancel
+              </button>
+              <button type="button" onClick={handleAddSubject} className="px-4 py-2 rounded bg-green-600 text-white">
+                Add
+              </button>
+            </div>
           </div>
-        </>
+        </div>
       )}
 
-      {/* Mark Attendance Modal */}
+      {/* Mark Attendance Modal (not shown in current tabs) */}
       {showMarkAttendanceModal && (
         <div className="fixed z-10 inset-0 overflow-y-auto">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
@@ -1051,6 +1320,7 @@ const TeacherClasses = () => {
                 </div>
               </div>
 
+              {/* Modal Footer: Action Buttons */}
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse space-y-2 sm:space-y-0 sm:space-x-3">
                 <button
                   type="button"
@@ -1072,7 +1342,7 @@ const TeacherClasses = () => {
         </div>
       )}
 
-      {/* Student History Modal */}
+      {/* Student History Modal (not shown in current tabs) */}
       {showStudentHistoryModal && selectedStudent && (
         <div className="fixed z-10 inset-0 overflow-y-auto">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
@@ -1139,6 +1409,7 @@ const TeacherClasses = () => {
                 </div>
               </div>
 
+              {/* Modal Footer: Action Buttons */}
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                 <button
                   type="button"
@@ -1170,6 +1441,8 @@ const TeacherClasses = () => {
               <h3 id="add-subject-title" className="text-lg font-medium text-gray-900">
                 Add Subject
               </h3>
+              
+              {/* Class Selection */}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700">Class</label>
                 <select
@@ -1192,12 +1465,17 @@ const TeacherClasses = () => {
                       <option>Basic 6</option>
                       <option>JSS 1</option>
                       <option>JSS 2</option>
+                      <option>JSS 3</option>
+                      {/* <option>SSS 1</option>
+                      <option>SSS 2</option> */}
                     </>
                   ) : (
                     <option value={assignedClass}>{assignedClass}</option>
                   )}
                 </select>
               </div>
+
+              {/* Subject Name Input */}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700">Subject Name</label>
                 <input
@@ -1209,6 +1487,8 @@ const TeacherClasses = () => {
                   autoFocus
                 />
               </div>
+
+              {/* Subject Code Input (Optional) */}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700">Subject Code (optional)</label>
                 <input
@@ -1218,7 +1498,7 @@ const TeacherClasses = () => {
                   className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"
                   placeholder="e.g. BASIC-SCI-JSS1"
                 />
-                {/* show auto-generated preview when input is empty */}
+                {/* Show auto-generated code preview when input is empty */}
                 {!newSubjectCode && newSubjectName && newSubjectClass && (
                   <div className="mt-2 text-xs text-gray-500">
                     Auto-generated code: <span className="font-medium">{generateCourseCode(newSubjectName, newSubjectClass)}</span>
@@ -1227,6 +1507,7 @@ const TeacherClasses = () => {
               </div>
             </div>
 
+            {/* Modal Footer: Action Buttons */}
             <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-2">
               <button type="button" onClick={() => setShowAddSubjectModal(false)} className="px-4 py-2 rounded border bg-white">
                 Cancel
