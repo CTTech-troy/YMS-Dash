@@ -18,14 +18,7 @@ const TeacherClasses = () => {
   // ============================================================================
   // STATE: Modal Controls
   // ============================================================================
-  // Control visibility of mark attendance modal
-  const [showMarkAttendanceModal, setShowMarkAttendanceModal] = useState(false);
-  const [showStudentHistoryModal, setShowStudentHistoryModal] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendance, setAttendance] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDateOption, setSelectedDateOption] = useState('today');
   const [activeTab, setActiveTab] = useState('students');
 
   // ============================================================================
@@ -34,8 +27,8 @@ const TeacherClasses = () => {
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(true);
   const [isAdminView, setIsAdminView] = useState(false);
-  const [results, setResults] = useState([]);
-  const [resultsLoading, setResultsLoading] = useState(true);
+  // Teacher's assigned class (normalized: lowercase, trimmed, single spaces)
+  const [assignedClass, setAssignedClass] = useState('');
 
   // ============================================================================
   // STATE: Subjects Management
@@ -81,7 +74,7 @@ const TeacherClasses = () => {
   // API CONFIGURATION
   // ============================================================================
   // Base API URL (from .env or fallback to production URL)
-  const API_BASE = (import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com').replace(/\/$/, '');
+  const API_BASE = (import.meta.env.VITE_API_URL || 'https://yms-backend-a2x4.onrender.com').replace(/\/$/, '');
   // Endpoint for subjects CRUD operations
   const SUBJECTS_BASE = `${API_BASE}/api/subjects`;
   // Endpoint for students list/crud
@@ -121,21 +114,6 @@ const TeacherClasses = () => {
   }
 
   // ============================================================================
-  // EFFECT: Load Students from Backend on Mount
-  // ============================================================================
-  /**
-   * Main effect to load students when component mounts.
-   * 
-   * Process:
-   * 1. Extract teacher UID and assigned class from auth/localStorage
-   * 2. Detect if user is admin/principal (assignedClass === 'admin'/'principal'/etc)
-   * 3. Fetch teacher record to get accurate assignedClass
-   * 4. Query students API with class filter if teacher, or all students if admin
-   * 5. Normalize student data (lowercase class, handle image paths)
-   * 6. Filter students by class if teacher
-   * 7. Fetch results/grades for the class or teacher
-   */
-    // ============================================================================
   // EFFECT: Load Students from Backend on Mount
   // ============================================================================
   useEffect(() => {
@@ -258,8 +236,7 @@ const TeacherClasses = () => {
             name: s.name || s.fullName || s.studentName || 'Unnamed',
             uid: s.uid || s.studentUid || s.studentId || '',
             class: detectedClass,
-            picture: s.picture || s.avatar || '',
-            attendance: s.attendance || { present: 0, absent: 0, total: 0, history: [] }
+            picture: s.picture || s.avatar || ''
           };
         });
 
@@ -284,40 +261,6 @@ const TeacherClasses = () => {
         }
 
         setStudents(finalList);
-
-        // ========================================
-        // FETCH RESULTS/GRADES
-        // ========================================
-        try {
-          setResultsLoading(true);
-          const RESULTS_BASE = `${API_BASE}/api/results`;
-          let rUrl = RESULTS_BASE;
-          
-          if (!adminMode) {
-            if (normalizedAssignedClass) rUrl = `${RESULTS_BASE}?class=${encodeURIComponent(normalizedAssignedClass)}`;
-            else if (staffIdFromAuth) rUrl = `${RESULTS_BASE}?teacherUid=${encodeURIComponent(staffIdFromAuth)}`;
-          }
-          
-          const rRes = await fetch(rUrl);
-          if (rRes.ok) {
-            const rRaw = await rRes.json().catch(() => []);
-            const rArr = Array.isArray(rRaw) ? rRaw : (rRaw.data || rRaw.results || []);
-            setResults(rArr);
-          } else {
-            const rf = await fetch(RESULTS_BASE);
-            if (rf.ok) {
-              const rr = await rf.json().catch(() => []);
-              setResults(Array.isArray(rr) ? rr : (rr.data || rr.results || []));
-            } else {
-              setResults([]);
-            }
-          }
-        } catch (e) {
-          console.warn('Failed fetching results', e);
-          setResults([]);
-        } finally {
-          setResultsLoading(false);
-        }
       } catch (err) {
         console.error('Unexpected error in loadStudentsForTeacher', err);
         setStudents([]);
@@ -333,15 +276,6 @@ const TeacherClasses = () => {
   // ============================================================================
   // EFFECT: Load Subjects on Mount
   // ============================================================================
-  /**
-   * Fetch subjects from API on component mount.
-   * 
-   * Process:
-   * 1. Call fetchSubjects() to get all subjects
-   * 2. Normalize subject fields (subjectName, subjectClass, etc.)
-   * 3. Filter subjects by assigned class if teacher
-   * 4. Show all subjects if admin
-   */
   useEffect(() => {
     const load = async () => {
       try {
@@ -363,7 +297,7 @@ const TeacherClasses = () => {
         // Filter subjects: show all if admin, else restrict to assigned class
         const visible = isAdminView 
           ? mapped 
-          : (assignedClass ? mapped.filter(m => String(m.class).trim() === String(assignedClass).trim()) : mapped);
+          : (assignedClass ? mapped.filter(m => String(m.class).trim().toLowerCase().replace(/\s+/g, ' ') === String(assignedClass).trim().toLowerCase().replace(/\s+/g, ' ')) : mapped);
         
         setClassSubjects(visible);
       } catch (err) {
@@ -375,93 +309,8 @@ const TeacherClasses = () => {
   }, [SUBJECTS_BASE, assignedClass, isAdminView]);
 
   // ============================================================================
-  // HANDLER: Open Attendance Modal
-  // ============================================================================
-  /**
-   * Initialize attendance modal when "Mark Attendance" button is clicked.
-   * 
-   * Sets all students to "present" by default, then shows modal.
-   */
-  const handleOpenAttendanceModal = () => {
-    // Initialize attendance: all students present by default
-    const initialAttendance = {};
-    students.forEach(student => {
-      initialAttendance[student.id] = true;
-    });
-    setAttendance(initialAttendance);
-    setSelectedDateOption('today');
-    setAttendanceDate(new Date().toISOString().split('T')[0]);
-    setShowMarkAttendanceModal(true);
-  };
-
-  // ============================================================================
-  // HANDLER: Toggle Student Attendance
-  // ============================================================================
-  /**
-   * Toggle attendance status for a single student.
-   * Flips the boolean value for the given student ID.
-   */
-  const toggleAttendance = studentId => {
-    setAttendance(prev => ({
-      ...prev,
-      [studentId]: !prev[studentId]
-    }));
-  };
-
-  // ============================================================================
-  // HANDLER: Change Attendance Date
-  // ============================================================================
-  /**
-   * Handle date option change in attendance modal.
-   * 
-   * Updates attendanceDate based on selected option:
-   * - 'today': use current date
-   * - 'yesterday': use yesterday's date
-   * - 'custom': keep current selected date (user can input manually)
-   */
-  const handleDateOptionChange = option => {
-    setSelectedDateOption(option);
-    let date = new Date();
-    if (option === 'yesterday') {
-      date.setDate(date.getDate() - 1);
-    } else if (option === 'custom') {
-      // Keep the current selected date, don't auto-update
-      return;
-    }
-    setAttendanceDate(date.toISOString().split('T')[0]);
-  };
-
-  // ============================================================================
-  // HANDLER: Save Attendance
-  // ============================================================================
-  /**
-   * Save attendance to backend (currently just shows success toast).
-   * In production, this would POST attendance data to an API endpoint.
-   */
-  const handleSaveAttendance = () => {
-    // In a real application, this would save to a database
-    toast.success('Attendance saved successfully!');
-    setShowMarkAttendanceModal(false);
-  };
-
-  // ============================================================================
-  // HANDLER: View Student History
-  // ============================================================================
-  /**
-   * Open student history/details modal for a specific student.
-   */
-  const handleViewStudentHistory = student => {
-    setSelectedStudent(student);
-    setShowStudentHistoryModal(true);
-  };
-
-  // ============================================================================
   // COMPUTED: Filter Students by Search Query
   // ============================================================================
-  /**
-   * Filter students list by search query (name or student ID).
-   * Case-insensitive partial matching.
-   */
   const filteredStudents = students.filter(
     student =>
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -469,69 +318,28 @@ const TeacherClasses = () => {
   );
 
   // ============================================================================
-  // HANDLER: Open Add Subject Modal
+  // BUTTON LOADING STATE
   // ============================================================================
-  /**
-   * Initialize and open "Add Subject" modal.
-   * Default subject class to teacher's assigned class.
-   */
+  // holds key of the current action e.g. 'addSubject', 'delete-<id>', 'saveSubject', 'view-<id>'
+  const [loadingAction, setLoadingAction] = useState(null);
+
+  // ============================================================================
+  // HANDLER: Open Add Subject Modal (shows brief loading)
+  // ============================================================================
   const handleOpenAddSubject = () => {
+    // show quick loading feedback
+    setLoadingAction('openAdd');
     setNewSubjectName('');
-    // Auto-fill subject class with teacher's assigned class
     setNewSubjectClass(assignedClass || '');
     setNewSubjectCode('');
     setShowAddSubjectModal(true);
+    // clear loading after short delay (UI feedback only)
+    setTimeout(() => setLoadingAction(null), 300);
   };
-
-  // ============================================================================
-  // HELPER: Generate Auto Course Code
-  // ============================================================================
-  /**
-   * Generate a short deterministic course code from subject name + class.
-   * 
-   * Format: {3-letter initials}-{class code}-{timestamp suffix}
-   * Example: "ENG-JSS1-A2B3"
-   * 
-   * @param {string} name - Subject name
-   * @param {string} klass - Class name
-   * @returns {string} Generated course code
-   */
-  function generateCourseCode(name = '', klass = '') {
-    // Remove non-alphanumeric characters and convert to uppercase
-    const clean = str =>
-      String(str || '')
-        .toUpperCase()
-        .replace(/[^A-Z0-9\s]/g, '')
-        .trim();
-    const n = clean(name);
-    const k = clean(klass);
-    
-    // Extract initials from subject name (max 3 letters)
-    const initials = n
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(w => w[0])
-      .slice(0, 3)
-      .join('');
-    
-    // Extract class code (alphanumeric characters, max 4)
-    const classCode = (k.match(/[A-Z0-9]+/g) || []).join('').slice(0, 4);
-    
-    // Add short timestamp suffix for uniqueness
-    const suffix = String(Date.now()).slice(-4);
-    
-    return `${initials || 'SUB'}-${classCode || 'CLS'}-${suffix}`;
-  }
 
   // ============================================================================
   // HANDLER: Add New Subject
   // ============================================================================
-  /**
-   * Create a new subject via API and add to local state.
-   * 
-   * Validates input, sends POST request to /api/subjects, and updates UI.
-   * Only adds to local list if subject class matches teacher's assigned class (or if admin).
-   */
   const handleAddSubject = async () => {
     const name = newSubjectName.trim();
     const klass = newSubjectClass.trim();
@@ -541,13 +349,13 @@ const TeacherClasses = () => {
     if (!name) return toast.error('Please enter a subject name');
     if (!klass) return toast.error('Please select a class');
 
+    setLoadingAction('addSubject');
+
     // Build request payload with teacher/staff identity
     const payload = {
       subjectName: name,
-      // Ensure we submit the teacher's assigned class
       subjectClass: assignedClass || klass,
       subjectCode: code || null,
-      // Attach current staff identity
       teacherUid: staffIdFromAuth || localStorage.getItem('uid') || null,
       teacherImg: currentUser?.photoURL || localStorage.getItem('img') || null,
       teachersName: staffNameFromAuth || localStorage.getItem('name') || null,
@@ -556,7 +364,6 @@ const TeacherClasses = () => {
     };
 
     try {
-      // POST to /api/subjects
       const { res } = await fetchSubjects('', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -577,7 +384,7 @@ const TeacherClasses = () => {
       };
       
       // Only add to local list if it belongs to teacher's assigned class
-      if (!assignedClass || String(newEntry.class).trim() === String(assignedClass).trim()) {
+      if (!assignedClass || String(newEntry.class).trim().toLowerCase().replace(/\s+/g, ' ') === String(assignedClass).trim().toLowerCase().replace(/\s+/g, ' ')) {
         setClassSubjects(prev => [...prev, newEntry]);
       }
       
@@ -586,38 +393,33 @@ const TeacherClasses = () => {
     } catch (err) {
       console.error('Failed adding subject', err);
       toast.error('Could not add subject');
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   // ============================================================================
-  // HANDLER: Open Subject Details Modal
+  // HANDLER: Open Subject Details Modal (brief loading)
   // ============================================================================
-  /**
-   * Open modal to view/edit subject details.
-   * Initialize edit fields from subject data.
-   * Trigger animation on open.
-   */
   const handleOpenSubjectModal = subject => {
+    const key = `view-${subject.id}`;
+    setLoadingAction(key);
     setModalSubject(subject);
     setEditName(subject.subjectName || subject.name || '');
     setEditClass(subject.subjectClass || subject.class || '');
     setEditCode(subject.subjectCode || subject.code || '');
     setIsEditingSubject(false);
     setShowSubjectModal(true);
-    // Trigger enter animation after render
     setModalAnimateIn(false);
     setTimeout(() => setModalAnimateIn(true), 10);
+    // brief UI feedback
+    setTimeout(() => setLoadingAction(null), 200);
   };
 
   // ============================================================================
   // HANDLER: Close Subject Details Modal
   // ============================================================================
-  /**
-   * Close subject modal with exit animation.
-   * Resets all modal state.
-   */
   const handleCloseSubjectModal = () => {
-    // Play exit animation then close
     setModalAnimateIn(false);
     setTimeout(() => {
       setModalSubject(null);
@@ -629,10 +431,6 @@ const TeacherClasses = () => {
   // ============================================================================
   // HANDLER: Start Edit Mode in Subject Modal
   // ============================================================================
-  /**
-   * Switch subject modal to edit mode.
-   * Allows user to modify subject fields.
-   */
   const handleStartEdit = () => {
     setIsEditingSubject(true);
   };
@@ -640,12 +438,7 @@ const TeacherClasses = () => {
   // ============================================================================
   // HANDLER: Cancel Subject Edit
   // ============================================================================
-  /**
-   * Cancel subject editing and revert changes.
-   * Resets edit fields to original values.
-   */
   const handleCancelEdit = () => {
-    // Reset edits to original values
     if (modalSubject) {
       setEditName(modalSubject.subjectName || modalSubject.name || '');
       setEditClass(modalSubject.subjectClass || modalSubject.class || '');
@@ -657,16 +450,13 @@ const TeacherClasses = () => {
   // ============================================================================
   // HANDLER: Delete Subject
   // ============================================================================
-  /**
-   * Delete a subject via API (DELETE /api/subjects/:id).
-   * Remove from local state on success.
-   */
   const handleDeleteSubject = async (id) => {
     if (!id) return;
+    const key = `delete-${id}`;
+    setLoadingAction(key);
     try {
       const { res } = await fetchSubjects(`/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        // Remove from local state
         setClassSubjects(prev => prev.filter(s => String(s.id) !== String(id)));
         toast.success('Subject deleted');
         handleCloseSubjectModal();
@@ -678,29 +468,27 @@ const TeacherClasses = () => {
     } catch (err) {
       console.error('Delete network error', err);
       toast.error('Could not delete subject');
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   // ============================================================================
   // HANDLER: Save Subject Changes
   // ============================================================================
-  /**
-   * Update a subject via API (PUT /api/subjects/:id).
-   * Update local state and modal on success.
-   */
   const handleSaveSubject = async () => {
     if (!modalSubject) return;
     const id = modalSubject.id;
     
-    // Build update payload
     const payload = {
       subjectName: editName.trim(),
       subjectClass: editClass.trim(),
       subjectCode: editCode.trim() || null
     };
+
+    setLoadingAction('saveSubject');
     
     try {
-      // PUT to /api/subjects/:id
       const { res } = await fetchSubjects(`/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -716,7 +504,6 @@ const TeacherClasses = () => {
       
       const updated = await res.json();
       
-      // Update local subjects list
       setClassSubjects(prev => prev.map(s => (String(s.id) === String(id) ? {
         id: updated.id || id,
         name: updated.subjectName || payload.subjectName,
@@ -726,56 +513,37 @@ const TeacherClasses = () => {
       } : s)));
       
       toast.success('Subject updated');
-      // Refresh modal content
       setModalSubject(prev => ({ ...prev, ...updated }));
       setIsEditingSubject(false);
     } catch (err) {
       console.error('Update network error', err);
       toast.error('Could not update subject');
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   // ============================================================================
   // HELPER: Convert Image to Display Source
   // ============================================================================
-  /**
-   * Convert various image formats to displayable src.
-   * Handles:
-   * - data: URIs (already formatted)
-   * - HTTP(S) URLs or site-relative paths
-   * - Raw base64 strings (converts to data: URI)
-   * - Objects with base64/data fields
-   * - Mongo/Mongoose Buffer objects
-   * - Uint8Array/ArrayBuffer (converts to object URL)
-   * - Null/falsy values (returns default avatar)
-   * 
-   * @param {*} input - Image data in various formats
-   * @param {string} mimeGuess - MIME type guess (default 'jpeg')
-   * @returns {string} Valid image src URL
-   */
   function getImageSrc(input, mimeGuess = 'jpeg') {
     if (input == null) return '/images/default-avatar.png';
 
-    // Handle string input
     if (typeof input === 'string') {
       const s = input.trim();
       if (!s) return '/images/default-avatar.png';
-      if (s.startsWith('data:')) return s;  // Already a data: URI
-      if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;  // HTTP URL or site-relative path
-      // Raw base64 string (no data: prefix) — convert to data: URI
+      if (s.startsWith('data:')) return s;
+      if (/^https?:\/\//i.test(s) || s.startsWith('/')) return s;
       if (/^[A-Za-z0-9+/=\s]+$/.test(s) && s.length > 50) {
         return `data:image/${mimeGuess};base64,${s}`;
       }
       return s;
     }
 
-    // Handle object input
     if (typeof input === 'object') {
-      // Check for URL-like fields
       if (typeof input.src === 'string' && input.src.trim()) return getImageSrc(input.src, mimeGuess);
       if (typeof input.url === 'string' && input.url.trim()) return getImageSrc(input.url, mimeGuess);
 
-      // Check for { base64: '...' } or { data: '...' }
       if (typeof input.base64 === 'string' && input.base64.trim()) {
         const s = input.base64.trim();
         return s.startsWith('data:') ? s : `data:image/${mimeGuess};base64,${s}`;
@@ -785,7 +553,6 @@ const TeacherClasses = () => {
         return s.startsWith('data:') ? s : `data:${input.type || `image/${mimeGuess}`};base64,${s}`;
       }
 
-      // Mongo/Mongoose Buffer-like: { data: [num, ...] } or { buffer: { data: [...] } }
       const arrData = Array.isArray(input.data) ? input.data : (input.buffer && Array.isArray(input.buffer.data) ? input.buffer.data : null);
       if (arrData) {
         try {
@@ -797,7 +564,6 @@ const TeacherClasses = () => {
         }
       }
 
-      // Handle Uint8Array or ArrayBuffer
       if (input instanceof Uint8Array || input instanceof ArrayBuffer) {
         const blob = input instanceof ArrayBuffer 
           ? new Blob([input], { type: `image/${mimeGuess}` }) 
@@ -806,7 +572,6 @@ const TeacherClasses = () => {
       }
     }
 
-    // Fallback
     return '/images/default-avatar.png';
   }
   
@@ -818,7 +583,7 @@ const TeacherClasses = () => {
       {/* Header with class name and description */}
       <div className="mb-6 min-w-0">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold text-gray-900 truncate whitespace-nowrap">{assignedClass || 'My Class'}</h1>
-        <p className="mt-1 text-xs sm:text-sm text-gray-500 truncate whitespace-nowrap max-w-[36rem]">Manage your class, students</p>
+        <p className="mt-1 text-xs sm:text-sm text-gray-500 truncate whitespace-nowrap max-w-[36rem]">Manage your class and students</p>
       </div>
 
       {/* Tab Navigation: Students | Subjects */}
@@ -969,10 +734,17 @@ const TeacherClasses = () => {
               {/* Add Subject Button */}
               <button
                 onClick={handleOpenAddSubject}
+                disabled={!!loadingAction}
                 className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
               >
-                <PlusIcon className="h-4 w-4 mr-2" />
-                Add
+                {loadingAction === 'openAdd' || loadingAction === 'addSubject' ? (
+                  <span>Loading...</span>
+                ) : (
+                  <>
+                    <PlusIcon className="h-4 w-4 mr-2" />
+                    Add
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -996,9 +768,10 @@ const TeacherClasses = () => {
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleOpenSubjectModal(subject)}
+                      disabled={!!loadingAction}
                       className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs sm:text-sm font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                     >
-                      View Details
+                      {loadingAction === `view-${subject.id}` ? 'Loading...' : 'View Details'}
                     </button>
                   </div>
                 </div>
@@ -1076,18 +849,21 @@ const TeacherClasses = () => {
                       <button
                         onClick={handleCloseSubjectModal}
                         className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
+                        disabled={!!loadingAction}
                       >
                         Cancel
                       </button>
                       <button
                         onClick={() => handleDeleteSubject(modalSubject.id)}
                         className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                        disabled={!!loadingAction}
                       >
-                        Delete
+                        {loadingAction === `delete-${modalSubject.id}` ? 'Loading...' : 'Delete'}
                       </button>
                       <button
                         onClick={handleStartEdit}
                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                        disabled={!!loadingAction}
                       >
                         Edit
                       </button>
@@ -1097,14 +873,16 @@ const TeacherClasses = () => {
                       <button
                         onClick={handleCancelEdit}
                         className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 text-xs sm:text-sm"
+                        disabled={!!loadingAction}
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleSaveSubject}
                         className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs sm:text-sm"
+                        disabled={!!loadingAction}
                       >
-                        Save
+                        {loadingAction === 'saveSubject' ? 'Saving...' : 'Save'}
                       </button>
                     </>
                   )}
@@ -1156,318 +934,8 @@ const TeacherClasses = () => {
                       <option>Basic 6</option>
                       <option>JSS 1</option>
                       <option>JSS 2</option>
-                    </>
-                  ) : (
-                    <option value={assignedClass}>{assignedClass}</option>
-                  )}
-                </select>
-              </div>
-
-              {/* Subject Name Input */}
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700">Subject Name</label>
-                <input
-                  type="text"
-                  value={newSubjectName}
-                  onChange={e => setNewSubjectName(e.target.value)}
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"
-                  placeholder="e.g. Computer Studies"
-                  autoFocus
-                />
-              </div>
-
-              {/* Subject Code Input (Optional) */}
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700">Subject Code (optional)</label>
-                <input
-                  type="text"
-                  value={newSubjectCode}
-                  onChange={e => setNewSubjectCode(e.target.value)}
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2"
-                  placeholder="e.g. BASIC-SCI-JSS1"
-                />
-                {/* Show auto-generated code preview when input is empty */}
-                {!newSubjectCode && newSubjectName && newSubjectClass && (
-                  <div className="mt-2 text-xs text-gray-500">
-                    Auto-generated code: <span className="font-medium">{generateCourseCode(newSubjectName, newSubjectClass)}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Modal Footer: Action Buttons */}
-            <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-2">
-              <button type="button" onClick={() => setShowAddSubjectModal(false)} className="px-4 py-2 rounded border bg-white">
-                Cancel
-              </button>
-              <button type="button" onClick={handleAddSubject} className="px-4 py-2 rounded bg-green-600 text-white">
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Mark Attendance Modal (not shown in current tabs) */}
-      {showMarkAttendanceModal && (
-        <div className="fixed z-10 inset-0 overflow-y-auto">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75" />
-            </div>
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
-              &#8203;
-            </span>
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900 truncate whitespace-nowrap">
-                      Mark Attendance {assignedClass ? `- ${assignedClass}` : ''}
-                    </h3>
-                    <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Select Date</label>
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <button
-                          type="button"
-                          onClick={() => handleDateOptionChange('today')}
-                          className={`px-3 py-1.5 text-sm font-medium rounded-md ${
-                            selectedDateOption === 'today' ? 'bg-blue-100 text-blue-800 border border-blue-300' : 'bg-gray-100 text-gray-800 border border-gray-300'
-                          }`}
-                        >
-                          Today
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDateOptionChange('yesterday')}
-                          className={`px-3 py-1.5 text-sm font-medium rounded-md ${
-                            selectedDateOption === 'yesterday' ? 'bg-blue-100 text-blue-800 border border-blue-300' : 'bg-gray-100 text-gray-800 border border-gray-300'
-                          }`}
-                        >
-                          Yesterday
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDateOptionChange('custom')}
-                          className={`px-3 py-1.5 text-sm font-medium rounded-md ${
-                            selectedDateOption === 'custom' ? 'bg-blue-100 text-blue-800 border border-blue-300' : 'bg-gray-100 text-gray-800 border border-gray-300'
-                          }`}
-                        >
-                          Custom Date
-                        </button>
-                      </div>
-                      {selectedDateOption === 'custom' && (
-                        <input
-                          type="date"
-                          id="attendanceDate"
-                          value={attendanceDate}
-                          onChange={e => setAttendanceDate(e.target.value)}
-                          className="mt-1 mb-4 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                        />
-                      )}
-                      <div className="text-sm text-gray-600 mb-4">
-                        Marking attendance for:{' '}
-                        <span className="font-medium">
-                          {selectedDateOption === 'today'
-                            ? 'Today'
-                            : selectedDateOption === 'yesterday'
-                            ? 'Yesterday'
-                            : new Date(attendanceDate).toLocaleDateString('en-US', {
-                                weekday: 'long',
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric'
-                              })}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Students</h4>
-                      <ul className="divide-y divide-gray-200">
-                        {students.map(student => (
-                          <li key={student.id} className="py-3 flex items-center justify-between">
-                            <div className="flex items-center">
-                              <div className="flex-shrink-0 h-8 w-8">
-                                <img className="h-8 w-8 rounded-full" src={getImageSrc(student.picture)} alt="" />
-                              </div>
-                              <div className="ml-3">
-                                <p className="text-sm font-medium text-gray-900">{student.name}</p>
-                                <p className="text-sm text-gray-500">{student.uid}</p>
-                              </div>
-                            </div>
-                            <div>
-                              <button
-                                type="button"
-                                onClick={() => toggleAttendance(student.id)}
-                                className={`inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white ${
-                                  attendance[student.id] ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
-                                } focus:outline-none focus:ring-2 focus:ring-offset-2 ${attendance[student.id] ? 'focus:ring-green-500' : 'focus:ring-red-500'}`}
-                              >
-                                {attendance[student.id] ? (
-                                  <CheckIcon className="h-5 w-5" aria-hidden="true" />
-                                ) : (
-                                  <XIcon className="h-5 w-5" aria-hidden="true" />
-                                )}
-                              </button>
-                              <span className="ml-2 text-sm text-gray-500">{attendance[student.id] ? 'Present' : 'Absent'}</span>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Modal Footer: Action Buttons */}
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse space-y-2 sm:space-y-0 sm:space-x-3">
-                <button
-                  type="button"
-                  className="w-full sm:w-auto inline-flex justify-center rounded-md border border-transparent shadow-sm px-3 py-2 bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  onClick={handleSaveAttendance}
-                >
-                  Save Attendance
-                </button>
-                <button
-                  type="button"
-                  className="w-full sm:w-auto mt-0 inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-3 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  onClick={() => setShowMarkAttendanceModal(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Student History Modal (not shown in current tabs) */}
-      {showStudentHistoryModal && selectedStudent && (
-        <div className="fixed z-10 inset-0 overflow-y-auto">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75" />
-            </div>
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
-              &#8203;
-            </span>
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full sm:mx-0 sm:h-10 sm:w-10">
-                    <img src={getImageSrc(selectedStudent.picture)} alt={selectedStudent.name} className="h-10 w-10 rounded-full" />
-                  </div>
-                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900 truncate whitespace-nowrap">{selectedStudent.name}'s Details</h3>
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-500 truncate whitespace-nowrap">
-                        Student ID: {selectedStudent.uid} | Class: {selectedStudent.class}
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1 truncate whitespace-nowrap">
-                        Overall Attendance: {Math.round((selectedStudent.attendance.present / selectedStudent.attendance.total) * 100)}% ({selectedStudent.attendance.present}/{selectedStudent.attendance.total} days)
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5">
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">Recent Attendance</h4>
-                  <ul className="divide-y divide-gray-200">
-                    {selectedStudent.attendance.history.map((record, index) => (
-                      <li key={index} className="py-3 flex justify-between items-center">
-                        <div className="text-sm text-gray-900">
-                          {new Date(record.date).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          })}
-                        </div>
-                        <div>
-                          <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${record.status === 'present' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {record.status === 'present' ? 'Present' : 'Absent'}
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="mt-5 border-t border-gray-200 pt-4">
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">Academic Performance</h4>
-                  <div className="bg-gray-50 p-3 rounded-md">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium text-gray-700">Average Grade:</span>
-                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">B+</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-gray-700">Last Assessment:</span>
-                      <span className="text-sm text-gray-900">85% (Mathematics)</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Modal Footer: Action Buttons */}
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button
-                  type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:w-auto sm:text-sm"
-                  onClick={() => setShowStudentHistoryModal(false)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Subject modal */}
-      {showAddSubjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* backdrop */}
-          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowAddSubjectModal(false)} />
-          {/* modal */}
-          <div
-            className="relative bg-white rounded-lg shadow-lg w-full max-w-md mx-4"
-            onClick={e => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-subject-title"
-          >
-            <div className="px-6 pt-6 pb-4">
-              <h3 id="add-subject-title" className="text-lg font-medium text-gray-900">
-                Add Subject
-              </h3>
-              
-              {/* Class Selection */}
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700">Class</label>
-                <select
-                  value={newSubjectClass}
-                  onChange={e => setNewSubjectClass(e.target.value)}
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 bg-white"
-                  disabled={Boolean(assignedClass)}
-                >
-                  {!assignedClass ? (
-                    <>
-                      <option value="">Select class</option>
-                      <option>Creche</option>
-                      <option>KG 1</option>
-                      <option>KG 2</option>
-                      <option>Nursery 2</option>
-                      <option>Basic 1</option>
-                      <option>Basic 2</option>
-                      <option>Basic 3</option>
-                      <option>Basic 4</option>
-                      <option>Basic 6</option>
-                      <option>JSS 1</option>
-                      <option>JSS 2</option>
                       <option>JSS 3</option>
-                      {/* <option>SSS 1</option>
-                      <option>SSS 2</option> */}
+                    
                     </>
                   ) : (
                     <option value={assignedClass}>{assignedClass}</option>
@@ -1509,11 +977,11 @@ const TeacherClasses = () => {
 
             {/* Modal Footer: Action Buttons */}
             <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-2">
-              <button type="button" onClick={() => setShowAddSubjectModal(false)} className="px-4 py-2 rounded border bg-white">
+              <button type="button" onClick={() => setShowAddSubjectModal(false)} className="px-4 py-2 rounded border bg-white" disabled={!!loadingAction}>
                 Cancel
               </button>
-              <button type="button" onClick={handleAddSubject} className="px-4 py-2 rounded bg-green-600 text-white">
-                Add
+              <button type="button" onClick={handleAddSubject} className="px-4 py-2 rounded bg-green-600 text-white" disabled={!!loadingAction}>
+                {loadingAction === 'addSubject' ? 'Loading...' : 'Add'}
               </button>
             </div>
           </div>

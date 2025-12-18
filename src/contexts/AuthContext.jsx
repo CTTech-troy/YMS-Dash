@@ -3,7 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { db } from "../../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import bcrypt from "bcryptjs";
-import api from '../api/axios'; // your axios instance
+import api from '../api/axios'; 
 
 const AuthContext = createContext(null);
 
@@ -268,7 +268,7 @@ export const AppProvider = ({ children, user }) => {
       // clear cache on logout
       try {
         Object.keys(localStorage).forEach(k => { if (k.startsWith('yms_app_cache_')) localStorage.removeItem(k); });
-      } catch {}
+      } catch {e}
       return;
     }
     // load once on login (show cached immediately, refresh in background)

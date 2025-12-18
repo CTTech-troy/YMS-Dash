@@ -254,9 +254,9 @@ const ResultManagement = () => {
   // Get grade from percentage
   const getGradeFromPercentage = percentage => {
     if (percentage >= 90) return 'A+';
-    if (percentage >= 75) return 'A';
-    if (percentage >= 65) return 'B';
-    if (percentage >= 55) return 'C';
+    if (percentage >= 70) return 'A';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C';
     if (percentage >= 45) return 'D';
     if (percentage >= 40) return 'E';
     return 'F';
@@ -461,7 +461,7 @@ const ResultManagement = () => {
                             {studentName}
                           </div>
                           <div className="text-sm text-gray-500">
-                            {studentUid}
+                            {}
                           </div>
                         </div>
                       </div>

@@ -435,102 +435,320 @@ const StudentManagement = () => {
     return `YMS-${String(newId).padStart(3, '0')}`;
   };
 
+  // dowload student 
   const handleDownloadPdf = () => {
-    if (!students || students.length === 0) {
+    if (students.length === 0) {
       toast.error('No students to export');
       return;
     }
+    setShowExportModal(true);
+  };
+
+  // ============================================================================
+  // STATE: Export Modal
+  // ============================================================================
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedExportClass, setSelectedExportClass] = useState(null);
+
+  // ============================================================================
+  // COMPUTED: Get unique classes from students (sorted alphabetically)
+  // ============================================================================
+  const availableClasses = useMemo(() => {
+    const classes = new Set(students.map(s => s.class).filter(Boolean));
+    return Array.from(classes).sort((a, b) => a.localeCompare(b));
+  }, [students]);
+
+  // ============================================================================
+  // HANDLER: Generate PDF for selected class
+  // ============================================================================
+  const handleExportClass = (selectedClass = null) => {
+    // If no class selected, export all students
+    const studentsToExport = selectedClass 
+      ? students.filter(s => s.class === selectedClass)
+      : students;
+
+    if (studentsToExport.length === 0) {
+      toast.error('No students to export');
+      return;
+    }
+
     try {
       const doc = new jsPDF({ unit: 'pt', format: 'A4' });
       doc.setFontSize(16);
-      doc.text('Students', 40, 40);
+      
+      const title = selectedClass 
+        ? `Students - ${selectedClass}` 
+        : 'All Students';
+      doc.text(title, 40, 40);
+
       const head = [['Full name', 'Class', 'LIN Number', 'UID']];
-      const body = students.map(s => [s.name || '', s.class || '', s.linNumber || '', s.uid || s.id || '']);
-      const tableOptions = { startY: 70, head, body, theme: 'striped', styles: { fontSize: 9, cellPadding: 4 }, headStyles: { fillColor: [37, 99, 235] } };
+      const body = studentsToExport
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        .map(s => [s.name || '', s.class || '', s.linNumber || '', s.uid || s.id || '']);
+
+      const tableOptions = { 
+        startY: 70, 
+        head, 
+        body, 
+        theme: 'striped', 
+        styles: { fontSize: 9, cellPadding: 4 }, 
+        headStyles: { fillColor: [37, 99, 235] } 
+      };
+
       if (typeof doc.autoTable === 'function') doc.autoTable(tableOptions);
       else if (typeof autoTable === 'function') autoTable(doc, tableOptions);
       else throw new Error('autoTable not available');
-      doc.save('students.pdf');
+
+      const filename = selectedClass 
+        ? `Students-${selectedClass.replace(/\s+/g, '-')}.pdf`
+        : 'All-Students.pdf';
+      
+      doc.save(filename);
+      toast.success(`${studentsToExport.length} students exported`);
+      setShowExportModal(false);
     } catch (err) {
       console.error('Export PDF failed', err);
       toast.error('Failed to generate PDF');
     }
   };
 
-  // Filtering + alphabetical sort
-  const q = (searchQuery || '').trim().toLowerCase();
+  // ============================================================================
+  // RENDER: Export Modal
+  // ============================================================================
+  const ExportModal = () => (
+    <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => setShowExportModal(false)} />
+      <div className="flex items-center justify-center min-h-screen p-4 text-center">
+        <div
+          className="relative z-50 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-md w-full"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="bg-white px-4 py-6 sm:p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Export Students</h3>
+            
+            <p className="text-sm text-gray-600 mb-4">Select a class to export or export all students</p>
 
-  // keep students sorted alphabetically by name for all displays
-  const sortedStudents = useMemo(() => {
-    return [...students].sort((a, b) => {
-      const na = (a?.name || '').toString().toLowerCase();
-      const nb = (b?.name || '').toString().toLowerCase();
-      return na.localeCompare(nb);
+            {/* Class List */}
+            <div className="space-y-2 mb-6 max-h-64 overflow-y-auto">
+              {availableClasses.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">No classes found</p>
+              ) : (
+                availableClasses.map(className => (
+                  <button
+                    key={className}
+                    onClick={() => handleExportClass(className)}
+                    className="w-full text-left px-4 py-3 rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-900">{className}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                        {students.filter(s => s.class === className).length} students
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Export All Button */}
+            {availableClasses.length > 0 && (
+              <div className="mb-6 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => handleExportClass(null)}
+                  className="w-full px-4 py-3 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors"
+                >
+                  Export All ({students.length} students)
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer */}
+          <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+            <button
+              type="button"
+              onClick={() => setShowExportModal(false)}
+              className="w-full inline-flex justify-center rounded-md border border-gray-300 px-4 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 sm:w-auto"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ============================================================================
+  // HANDLER: Promote All Students to Next Class
+  // ============================================================================
+  const handlePromoteAll = async () => {
+    if (students.length === 0) {
+      toast.error('No students to promote');
+      return;
+    }
+
+    // Confirm action
+    const confirmed = await Swal.fire({
+      title: 'Promote All Students?',
+      text: `This will promote all ${students.length} students to their next class level.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#3085d6',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Yes, promote all',
+      cancelButtonText: 'Cancel'
     });
-  }, [students]);
 
-  const filteredStudents = q ? sortedStudents.filter(s => {
-    const fields = [
-      s.name, s.uid, s.linNumber, s.class,
-      (s.guardians && s.guardians[0] && s.guardians[0].name) || '',
-      (s.guardians && s.guardians[0] && s.guardians[0].phone) || '',
-      (s.guardians && s.guardians[0] && s.guardians[0].email) || ''
-    ].map(v => (v || '').toString().toLowerCase());
-    return fields.some(f => f.includes(q));
-  }) : sortedStudents;
+    if (!confirmed.isConfirmed) return;
 
-  // Pagination state and helpers
+    setIsLoading(true);
+
+    try {
+      // Prepare batch promotion payload
+      const promotionPayload = {
+        studentIds: students.map(s => s.id || s._id),
+        action: 'promote'
+      };
+
+      const res = await fetch(`${API_BASE}/api/students/bulk-promote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(promotionPayload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Failed to promote students');
+      }
+
+      const result = await res.json();
+      
+      // Update local state with promoted students
+      const promotedCount = result.promoted || students.length;
+      setStudents(prev =>
+        prev.map(s => ({
+          ...s,
+          class: promoteStudentClass(s.class) // helper function to get next class
+        }))
+      );
+
+      toast.success(`${promotedCount} students promoted successfully`);
+    } catch (err) {
+      console.error('Bulk promotion failed', err);
+      toast.error(err?.message || 'Failed to promote students');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ============================================================================
+  // HELPER: Get Next Class for Student Promotion
+  // ============================================================================
+  function promoteStudentClass(currentClass = '') {
+    const classProgression = {
+      'creche': 'kg 1',
+      'kg 1': 'kg 2',
+      'kg 2': 'nursery 2',
+      'nursery 2': 'basic 1',
+      'basic 1': 'basic 2',
+      'basic 2': 'basic 3',
+      'basic 3': 'basic 4',
+      'basic 4': 'basic 6',
+      'basic 6': 'jss 1',
+      'jss 1': 'jss 2',
+      'jss 2': 'jss 3',
+      'jss 3': 'ss 1',
+      'ss 1': 'ss 2',
+      'ss 2': 'ss 3',
+      'ss 3': 'graduated' // terminal class
+    };
+
+    const normalized = (currentClass || '').trim().toLowerCase();
+    return classProgression[normalized] || currentClass; // return original if not found
+  }
+
+  // ============================================================================
+  // HANDLER: Promote Single Student
+  // ============================================================================
+  const handlePromoteStudent = async (studentId) => {
+    if (!studentId) return;
+
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/students/${studentId}/promote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Failed to promote student');
+      }
+
+      const updatedStudent = await res.json();
+
+      // Update local state
+      setStudents(prev =>
+        prev.map(s =>
+          String(s.id) === String(studentId)
+            ? { ...s, class: updatedStudent.class }
+            : s
+        )
+      );
+
+      toast.success('Student promoted successfully');
+    } catch (err) {
+      console.error('Student promotion failed', err);
+      toast.error(err?.message || 'Failed to promote student');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ============================================================================
+  // STATE: Pagination
+  // ============================================================================
   const [currentPage, setCurrentPage] = useState(1);
-  // fixed rows per page (10)
-  const [pageSize] = useState(10);
+  const PAGE_SIZE = 10; // items per page for client-side pagination
 
-  // reset page when filters or data change
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, students]);
+  // ============================================================================
+  // COMPUTED: Pagination Values
+  // ============================================================================
+  const totalItems = students.length;
+  const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const endIndex = startIndex + PAGE_SIZE;
 
-  const totalItems = filteredStudents.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const startIndex = Math.min(totalItems, (currentPage - 1) * pageSize);
-  const endIndex = Math.min(totalItems, startIndex + pageSize);
+  // Filter students based on search query
+  const filteredStudents = students.filter(student =>
+    (student.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (student.uid || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (student.linNumber || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Paginate filtered results
   const displayedStudents = filteredStudents.slice(startIndex, endIndex);
 
-  // Helper for editing guardian fields in editableStudent
-  const editGuardianChange = (idx, field, value) => {
+  // ============================================================================
+  // HANDLER: Edit Guardian Field in View Modal
+  // ============================================================================
+  const editGuardianChange = (index, field, value) => {
     setEditableStudent(prev => {
-      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
-      guardians[idx] = { ...guardians[idx], [field]: value };
+      const guardians = [...(prev.guardians || [])];
+      guardians[index] = { ...guardians[index], [field]: value };
       return { ...prev, guardians };
     });
   };
 
-  // Helper for removing a guardian in editableStudent
-  const removeEditableGuardian = (idx) => {
+  // ============================================================================
+  // HANDLER: Remove Guardian from View Modal
+  // ============================================================================
+  const removeEditableGuardian = (index) => {
     setEditableStudent(prev => {
-      const guardians = Array.isArray(prev.guardians) ? [...prev.guardians] : [];
-      guardians.splice(idx, 1);
+      const guardians = (prev.guardians || []).filter((_, i) => i !== index);
       return { ...prev, guardians };
     });
-  };
-
-  // Helper for adding a guardian in editableStudent
-  // (removed unused addEditableGuardian function)
-
-  // Add this handler near other handlers (e.g. after handleDownloadPdf)
-  const handlePromoteAll = async () => {
-    if (!confirm('Promote all students to the next class?')) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/students/promote`, { method: 'POST' });
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        throw new Error(t || `Server ${res.status}`);
-      }
-      const payload = await res.json();
-      const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
-      setStudents(list.map(normalizeStudent));
-      toast.success('Promotion completed');
-    } catch (err) {
-      console.error(err);
-      toast.error('Promotion failed');
-    }
   };
 
   return (
@@ -1248,6 +1466,10 @@ const StudentManagement = () => {
           </div>
         </div>
       )}
+
+      {/* Export Modal */}
+      {showExportModal && <ExportModal />}
+
     </DashboardLayout>
   );
 };

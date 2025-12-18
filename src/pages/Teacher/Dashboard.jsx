@@ -3,7 +3,7 @@ import DashboardLayout from '../../components/DashboardLayout';
 import { UsersIcon, BookOpenIcon, ClipboardListIcon, CalendarIcon, BellIcon } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+// import { toast } from 'sonner';
 
 const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
 
@@ -12,10 +12,8 @@ const fallbackAssignedClass = {
   name: 'Class Loading',
   students: 0
 };
-const recentActivities = [{ id: 1, type: 'Result', description: 'Uploaded Term 1 results for Class 3A', time: '2 hours ago' }, { id: 2, type: 'Attendance', description: 'Marked attendance for Class 3A', time: '1 day ago' }, { id: 3, type: 'Active', description: 'New student Alex Johnson added to Class 3A', time: '3 days ago' }];
 
 // upcoming events loaded from API and filtered for teacher-visible events
-
 const isVisibleToTeacher = (ev) => {
   if (!ev) return false;
   // treat boolean forTeachers first
@@ -46,8 +44,8 @@ const TeacherDashboard = () => {
   // upcoming events loaded from API and filtered for teacher-visible events
   const [upcomingEvents, setUpcomingEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const [notifications, setNotifications] = useState([]);
-  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  // const [notifications, setNotifications] = useState([]);
+  // const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [assignedStudentsCount, setAssignedStudentsCount] = useState(undefined);
   const [teacherSubjectCount, setTeacherSubjectCount] = useState(undefined);
 
@@ -59,11 +57,7 @@ const TeacherDashboard = () => {
     return { ...s, class: unified };
   };
 
-  // helper to compare class names/ids (case-insensitive)
-  const classMatches = (studentClass, assignedClass) => {
-    if (!studentClass || !assignedClass) return false;
-    return String(studentClass).trim().toLowerCase() === String(assignedClass).trim().toLowerCase();
-  };
+
 
   // fetch counts: students in assigned class and subjects added by this teacher
   useEffect(() => {
@@ -79,118 +73,107 @@ const TeacherDashboard = () => {
       // helper list for principals
       const principalClasses = ['jss1','jss2','jss3','ss1','ss2','ss3'];
 
-      // 1) Students count
+      console.debug('fetchCounts starting:', { assignedClass, teacherProfile: teacherProfile.name });
+
+      // ========================================
+      // 1) STUDENTS COUNT
+      // ========================================
       try {
-        // prefer explicit count if provided from profile
-        if (typeof teacherProfile.studentsCount === 'number') {
-          setAssignedStudentsCount(teacherProfile.studentsCount);
-        } else if (Array.isArray(teacherProfile.raw?.students)) {
-          // normalize local students before counting
-          const normalizedLocal = teacherProfile.raw.students.map(normalizeStudent);
+        let studentList = [];
 
-          // debug logging for normalized data and counts
-          console.log('fetchCounts: assignedClass =', assignedClass);
-          console.log('fetchCounts: normalizedLocal length =', normalizedLocal.length);
-          console.log('fetchCounts: normalizedLocal classes =', normalizedLocal.map(s => s.class));
-
-           // role-based / assignedClass-based visibility
-           if (assignedClass === 'admin') {
-             // admin assignedClass -> show all students
-             setAssignedStudentsCount(normalizedLocal.length);
-           } else if (assignedClass === 'principal') {
-             // principal assignedClass -> only JSS1-SS3
-             setAssignedStudentsCount(normalizedLocal.filter(s => principalClasses.includes(s.class)).length);
-           } else if (assignedClass && assignedClass !== '') {
-             // specific class assigned to teacher
-             setAssignedStudentsCount(normalizedLocal.filter(s => s.class === assignedClass).length);
-           } else {
-             // fallback: count all local students
-             setAssignedStudentsCount(normalizedLocal.length);
-           }
-        } else {
-          // No local students array -> query backend (try scoped query first, otherwise fetch all)
-          try {
-            let arr = [];
-            // If admin/principal we fetch complete list and apply server-side or client-side filter
-            if (assignedClass === 'admin' || assignedClass === 'principal' || !assignedClass) {
-              // fetch all students
-              const res = await fetch(`${API_BASE}/api/students`);
-              if (res.ok) arr = await res.json();
-              
-            } else {
-              // try server-side class query first
-              const q = encodeURIComponent(assignedClass);
-              let res = await fetch(`${API_BASE}/api/students?class=${q}`);
-              if (res.ok) {
-                arr = await res.json();
-              } else {
-                // fallback to fetching all students
-                const res2 = await fetch(`${API_BASE}/api/students`);
-                if (res2.ok) arr = await res2.json();
-              }
-            }
-
-            const list = Array.isArray(arr) ? arr : (arr?.data || arr?.students || []);
-            const normalized = list.map(normalizeStudent);
-
-            let filtered = [];
-            if (assignedClass === 'admin') {
-              filtered = normalized;
-            } else if (assignedClass === 'principal') {
-              filtered = normalized.filter(s => principalClasses.includes(s.class));
-            } else if (assignedClass && assignedClass !== '') {
-              filtered = normalized.filter(s => s.class === assignedClass);
-            } else {
-              filtered = normalized;
-            }
-
-            setAssignedStudentsCount(filtered.length);
-          } catch (e) {
-            console.warn('Student fetch failed, skipping remote count', e);
-            setAssignedStudentsCount(undefined);
+        // Try to fetch students from API
+        try {
+          const res = await fetch(`${API_BASE}/api/students`);
+          if (res.ok) {
+            const json = await res.json();
+            studentList = Array.isArray(json) ? json : (json?.data || json?.students || []);
           }
+        } catch (e) {
+          console.warn('Failed to fetch students from /api/students', e);
+          studentList = [];
         }
+
+        // Normalize all students
+        const normalizedStudents = studentList.map(normalizeStudent);
+
+        console.debug('fetchCounts: fetched & normalized students', {
+          total: normalizedStudents.length,
+          classes: [...new Set(normalizedStudents.map(s => s.class))]
+        });
+
+        // Filter by teacher's assigned class
+        let filteredStudents = [];
+        
+        if (assignedClass === 'admin') {
+          // Admin sees all students
+          filteredStudents = normalizedStudents;
+        } else if (assignedClass === 'principal' || assignedClass === 'headmaster' || assignedClass === 'head') {
+          // Principal sees only standard classes (JSS1-SS3)
+          filteredStudents = normalizedStudents.filter(s => principalClasses.includes(s.class));
+        } else if (assignedClass && assignedClass !== '') {
+          // Teacher with specific assigned class
+          filteredStudents = normalizedStudents.filter(s => s.class === assignedClass);
+        } else {
+          // No assigned class -> show all
+          filteredStudents = normalizedStudents;
+        }
+
+        console.debug('fetchCounts: student count result', {
+          assignedClass,
+          filteredCount: filteredStudents.length,
+          studentNames: filteredStudents.map(s => ({ name: s.name, class: s.class }))
+        });
+
+        setAssignedStudentsCount(filteredStudents.length);
       } catch (e) {
         console.warn('Failed to compute assigned students count', e);
-        setAssignedStudentsCount(undefined);
+        setAssignedStudentsCount(0);
       }
 
-      // 2) Subjects count (unchanged logic, normalized helpers used where helpful)
+      // ========================================
+      // 2) SUBJECTS COUNT
+      // ========================================
       try {
-        if (typeof teacherProfile.subjectsCount === 'number') {
-          setTeacherSubjectCount(teacherProfile.subjectsCount);
-        } else if (Array.isArray(teacherProfile.raw?.subjects)) {
-          setTeacherSubjectCount(teacherProfile.raw.subjects.length);
-        } else {
-          const teacherId = teacherProfile.id ?? teacherProfile.uid ?? null;
-          let counted;
-          if (teacherId) {
-            const tryUrls = [
-              `${API_BASE}/api/subjects?teacherId=${encodeURIComponent(teacherId)}`,
-              `${API_BASE}/api/subjects?teacher=${encodeURIComponent(teacherId)}`
-            ];
-            for (const url of tryUrls) {
-              try {
-                const res = await fetch(url);
-                if (res.ok) {
-                  const list = await res.json();
-                  counted = Array.isArray(list) ? list.length : (list?.length ?? counted);
-                  break;
-                }
-              } catch {
-                // ignore and try next
+        const teacherId = teacherProfile.id ?? teacherProfile.uid ?? null;
+        let subjectList = [];
+
+        if (teacherId) {
+          // Try to fetch subjects for this teacher
+          try {
+            const res = await fetch(`${API_BASE}/api/subjects?teacher=${encodeURIComponent(teacherId)}`);
+            if (res.ok) {
+              const json = await res.json();
+              subjectList = Array.isArray(json) ? json : (json?.data || json?.subjects || []);
+            }
+          } catch (e) {
+            console.warn('Failed to fetch subjects for teacher', e);
+          }
+
+          // Fallback: try without filter
+          if (subjectList.length === 0) {
+            try {
+              const res = await fetch(`${API_BASE}/api/subjects`);
+              if (res.ok) {
+                const json = await res.json();
+                const allSubjects = Array.isArray(json) ? json : (json?.data || json?.subjects || []);
+                // Filter by teacher ID
+                subjectList = allSubjects.filter(s => 
+                  (s.teacher === teacherId || s.teacherId === teacherId || s.teacherUid === teacherId)
+                );
               }
+            } catch (e) {
+              console.warn('Failed to fetch all subjects', e);
             }
           }
-          if (typeof counted === 'number') {
-            setTeacherSubjectCount(counted);
-          } else if (typeof teacherProfile.subject === 'string' && teacherProfile.subject.trim()) {
-            const n = teacherProfile.subject.split(',').map(s => s.trim()).filter(Boolean).length;
-            setTeacherSubjectCount(n);
-          } else {
-            setTeacherSubjectCount(0);
-          }
         }
+
+        console.debug('fetchCounts: subject count result', {
+          teacherId,
+          subjectCount: subjectList.length,
+          subjects: subjectList.map(s => ({ name: s.name, id: s.id }))
+        });
+
+        setTeacherSubjectCount(subjectList.length);
       } catch (e) {
         console.warn('Failed to compute teacher subject count', e);
         setTeacherSubjectCount(0);
@@ -198,7 +181,7 @@ const TeacherDashboard = () => {
     };
 
     fetchCounts();
-  }, [teacherProfile, userRole]);
+  }, [teacherProfile]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -328,63 +311,15 @@ setTeacherProfile(normalized);
     return () => { mounted = false; ac.abort(); };
   }, []);
 
-  // fetch notifications and expose their read/unread state
-  useEffect(() => {
-    let mounted = true;
-    const ac = new AbortController();
-    (async () => {
-      setNotificationsLoading(true);
-      try {
-        const res = await fetch(`${API_BASE}/api/notifications`, { signal: ac.signal });
-        if (!res.ok) throw new Error('Failed to load notifications');
-        const json = await res.json();
-        const list = Array.isArray(json) ? json : (Array.isArray(json.data) ? json.data : []);
-        if (!mounted) return;
-        // normalize read flag
-        setNotifications(list.map(n => ({ ...n, read: !!(n.read) })));
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          // ignore aborts
-        } else {
-          console.warn('Could not load notifications', err);
-        }
-        if (mounted) setNotifications([]);
-      } finally {
-        if (mounted) setNotificationsLoading(false);
-      }
-    })();
-    return () => { mounted = false; ac.abort(); };
-  }, []);
 
-  // toggle read/unread state (optimistic UI + backend update)
-  const toggleNotificationRead = async (id) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: !n.read } : n));
-    try {
-      await fetch(`${API_BASE}/api/notifications/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ read: true })
-      });
-    } catch (err) {
-      // rollback on error
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: !n.read } : n));
-      toast?.error?.('Could not update notification state');
-    }
-  };
-
-  // derive stats using normalized teacherProfile when available
+  // derive stats using fetched counts
   const assignedClassName = teacherProfile?.assignedClass || fallbackAssignedClass.name;
-  const normalizedStudentsLen = Array.isArray(teacherProfile?.raw?.students) ? teacherProfile.raw.students.length : undefined;
-  const normalizedSubjectsLen = Array.isArray(teacherProfile?.raw?.subjects) ? teacherProfile.raw.subjects.length : undefined;
 
-  // total students prefers normalized students length, then fetched assignedStudentsCount, then profile count, then fallback
-  const totalStudents = normalizedStudentsLen ?? assignedStudentsCount ?? teacherProfile?.studentsCount ?? fallbackAssignedClass.students;
+  // total students: use fetched count (most accurate from API)
+  const totalStudents = assignedStudentsCount ?? fallbackAssignedClass.students;
 
-  // subject count prefers normalized subjects length, then fetched teacherSubjectCount, then profile subjectsCount, then fallback
-  const subjectCount = normalizedSubjectsLen ?? teacherSubjectCount ?? teacherProfile?.subjectsCount
-    ?? (typeof teacherProfile?.subject === 'string' && teacherProfile.subject.trim()
-        ? teacherProfile.subject.split(',').map(s => s.trim()).filter(Boolean).length
-        : 0);
+  // subject count: use fetched count (most accurate from API)
+  const subjectCount = teacherSubjectCount ?? 0;
 
   const upcomingEventsCount = Array.isArray(upcomingEvents) ? upcomingEvents.length : 0;
 
@@ -397,27 +332,13 @@ setTeacherProfile(normalized);
     color: 'bg-blue-500'
   }, {
     name: 'Total Students',
-    // show current logged-in teacher's matched student count when available, otherwise fallback to totalStudents
-    value: (() => {
-      try {
-        if (classComparison && classComparison.teacherMatches) {
-          const matches = Object.values(classComparison.teacherMatches || {});
-          const meUid = (currentUser?.uid || '').toString().toLowerCase();
-          for (const m of matches) {
-            const t = m.teacher || {};
-            const tUid = (t.uid || t.id || t.staffId || '').toString().toLowerCase();
-            if (tUid && meUid && tUid === meUid) return m.count;
-          }
-        }
-      } catch (e) {
-        // ignore and fallback
-      }
-      return totalStudents;
-    })(),
+    // Display exact count from API for assigned class
+    value: totalStudents,
     icon: <UsersIcon className="h-6 w-6" />,
     color: 'bg-green-500'
   }, {
-    name: 'Total subjects',
+    name: 'Total Subjects',
+    // Display exact count from API for teacher's subjects
     value: subjectCount,
     icon: <ClipboardListIcon className="h-6 w-6" />,
     color: 'bg-orange-500'
@@ -600,7 +521,7 @@ setTeacherProfile(normalized);
         ))}
       </div>
 
-      <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div className="mt-6 bg-white shadow rounded-lg">
         <div className="bg-white shadow rounded-lg">
           <div className="px-4 py-5 sm:px-6">
             <h2 className="text-lg font-medium text-gray-900">Upcoming Events</h2>
@@ -634,40 +555,7 @@ setTeacherProfile(normalized);
         </div>
       </div>
 
-      {/* Notifications panel */}
-      <div className="mt-6 bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:px-6 flex items-center justify-between">
-          <h2 className="text-lg font-medium text-gray-900">Notifications</h2>
-          <div className="text-sm text-gray-500">{notificationsLoading ? '…' : `${notifications.length} total`}</div>
-        </div>
-        <div className="border-t border-gray-200">
-          {notificationsLoading ? (
-            <div className="px-4 py-6 text-center text-gray-500">Loading notifications…</div>
-          ) : notifications.length === 0 ? (
-            <div className="px-4 py-6 text-center text-gray-500">No notifications.</div>
-          ) : (
-            <ul className="divide-y divide-gray-100">
-              {notifications.map(n => (
-                <li key={n.id || n._id} className={`px-4 py-3 flex items-start justify-between ${n.read ? 'bg-white' : 'bg-blue-50'}`}>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{n.title || n.headline || 'Notification'}</div>
-                    <div className="text-xs text-gray-500 truncate">{n.message || n.body || ''}</div>
-                    <div className="text-xs text-gray-400 mt-1">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</div>
-                  </div>
-                  <div className="ml-4 flex-shrink-0 flex items-center space-x-2">
-                    <button
-                      onClick={() => toggleNotificationRead(n.id || n._id)}
-                      className={`px-2 py-1 text-xs rounded-md ${n.read ? 'bg-gray-100 text-gray-700' : 'bg-indigo-600 text-white'}`}
-                    >
-                      {n.read ? 'Mark unread' : 'Mark read'}
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      
 
       <div className="mt-8">
         <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
