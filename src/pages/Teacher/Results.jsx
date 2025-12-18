@@ -872,7 +872,7 @@ const TeacherResults = () => {
       <Modal open={showAddModal} title="Add New Result" onClose={() => setShowAddModal(false)} className="sm:max-w-4xl">
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-3">
               <div>
                 <label htmlFor="studentId" className="block text-sm font-medium text-gray-700">Student</label>
                 <select 
@@ -904,16 +904,15 @@ const TeacherResults = () => {
                   <option value="2027/2028">2027/2028</option>
                 </select>
               </div>
-            </div>
-
-            <div>
-              <label htmlFor="term" className="block text-sm font-medium text-gray-700">Term</label>
-              <select id="term" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
-                <option value="">Select term</option>
-                <option value="First Term">First Term</option>
-                <option value="Second Term">Second Term</option>
-                <option value="Third Term">Third Term</option>
-              </select>
+              <div>
+                <label htmlFor="term" className="block text-sm font-medium text-gray-700">Term</label>
+                <select id="term" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
+                  <option value="">Select term</option>
+                  <option value="First Term">First Term</option>
+                  <option value="Second Term">Second Term</option>
+                  <option value="Third Term">Third Term</option>
+                </select>
+              </div>
             </div>
 
             {(selectedStudent || subjects.length > 0) && (
@@ -944,7 +943,7 @@ const TeacherResults = () => {
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">3rd</th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam</th>
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th>
+                              {/* <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">%</th> */}
                               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th>
                             </tr>
                           </thead>
@@ -965,7 +964,7 @@ const TeacherResults = () => {
                                   <input type="number"  value={subject.exam} onChange={e => handleSubjectScoreChange(subject.id, 'exam', e.target.value)} className="w-16 focus:ring-blue-500 focus:border-blue-500 block shadow-sm text-sm border-gray-300 rounded-md" />
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{subject.total}</td>
-                                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td>
+                                {/* <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{(subject.percentage || 0).toFixed(1)}%</td> */}
                                 <td className="px-3 py-2 whitespace-nowrap">
                                   <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${subject.grade === 'A+' || subject.grade === 'A' ? 'bg-green-100 text-green-800' : subject.grade === 'B' ? 'bg-blue-100 text-blue-800' : subject.grade === 'C' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>{subject.grade}</span>
                                 </td>
@@ -996,7 +995,7 @@ const TeacherResults = () => {
       <Modal open={showEditModal} title="Edit Result" onClose={() => { setShowEditModal(false); resetForm(); }} className="sm:max-w-4xl">
         <form onSubmit={handleEditSubmit}>
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-3">
               <div>
                 <label htmlFor="studentId_edit" className="block text-sm font-medium text-gray-700">Student</label>
                 <select 
@@ -1028,16 +1027,15 @@ const TeacherResults = () => {
                   <option value="2027/2028">2027/2028</option>
                 </select>
               </div>
-            </div>
-
-            <div>
-              <label htmlFor="term_edit" className="block text-sm font-medium text-gray-700">Term</label>
-              <select id="term_edit" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
-                <option value="">Select term</option>
-                <option value="First Term">First Term</option>
-                <option value="Second Term">Second Term</option>
-                <option value="Third Term">Third Term</option>
-              </select>
+              <div>
+                <label htmlFor="term_edit" className="block text-sm font-medium text-gray-700">Term</label>
+                <select id="term_edit" name="term" required value={formData.term} onChange={handleInputChange} className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md">
+                  <option value="">Select term</option>
+                  <option value="First Term">First Term</option>
+                  <option value="Second Term">Second Term</option>
+                  <option value="Third Term">Third Term</option>
+                </select>
+              </div>
             </div>
 
             {(formData.subjects.length > 0 || subjects.length > 0) && (
