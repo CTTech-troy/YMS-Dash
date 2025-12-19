@@ -83,6 +83,10 @@ const TeacherResults = () => {
 
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [loadingEdit, setLoadingEdit] = useState(false);
+  const [loadingDeleteId, setLoadingDeleteId] = useState(null);
+  const [loadingComment, setLoadingComment] = useState(false);
 
   const resetForm = () => {
     setFormData({
@@ -128,41 +132,45 @@ const TeacherResults = () => {
     const resolvedStudent = findStudentById(studentId) || findStudentById(studentuid) || null;
     if (resolvedStudent) setSelectedStudent(resolvedStudent);
 
+    // Keep reference to the selected result being edited
+    setSelectedResult(result || null);
+
     setEditingId(String(result.id || result._id || ''));
     setShowEditModal(true);
   };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-    if (!editingId) {
+    const targetId = editingId || selectedResult?.id || selectedResult?._id || selectedResult?.resultId || '';
+    if (!targetId) {
       toast.error('Missing result id for edit.');
       return;
     }
-    if (!formData.studentId) {
-      toast.error('Please select a student');
-      return;
-    }
+    // Allow editing without re-selecting student: prefer formData.studentId, then formData.studentuid,
+    // then selectedStudent, then selectedResult.studentId/Uid as fallback.
+    const studentIdFallback = formData.studentId || formData.studentuid || selectedStudent?.id || selectedResult?.studentId || selectedResult?.studentUid || selectedResult?.studentuid || '';
+    setLoadingEdit(true);
     try {
       const payload = {
-        studentId: formData.studentId,
-        studentuid: formData.studentuid || formData.studentId,
-        studentUid: formData.studentuid || formData.studentId,
+        studentId: studentIdFallback,
+        studentuid: formData.studentuid || studentIdFallback,
+        studentUid: formData.studentuid || studentIdFallback,
         session: formData.session,
         term: formData.term,
         subjects: formData.subjects,
         teacherComment: formData.teacherComment || ''
       };
-      const res = await api.put(`/api/results/${encodeURIComponent(editingId)}`, payload);
-      const updated = res?.data || { id: editingId, ...payload };
-      const updatedNormalized = { ...updated, id: updated.id || updated._id || editingId };
-      setResults(prev => prev.map(r => (String(r.id || r._id) === String(editingId) ? { ...r, ...updatedNormalized } : r)));
+      const res = await api.put(`/api/results/${encodeURIComponent(targetId)}`, payload);
+      const updated = res?.data || { id: targetId, ...payload };
+      const updatedNormalized = { ...updated, id: updated.id || updated._id || targetId };
+      setResults(prev => prev.map(r => (String(r.id || r._id) === String(targetId) ? { ...r, ...updatedNormalized } : r)));
       toast.success('Result updated.');
       setShowEditModal(false);
       resetForm();
       await loadResults();
       try {
-        const resolvedStudent = selectedStudent || findStudentById(formData.studentId);
-        const studentIdOrUid = resolvedStudent?.id || resolvedStudent?.uid || formData.studentId;
+        const resolvedStudent = selectedStudent || findStudentById(formData.studentId) || findStudentById(selectedResult?.studentId) || findStudentById(selectedResult?.studentUid);
+        const studentIdOrUid = resolvedStudent?.uid || resolvedStudent?.id || formData.studentuid || formData.studentId;
         await api.put(`/api/students/${encodeURIComponent(studentIdOrUid)}`, {
           lastResultSession: formData.session,
           lastResultTerm: formData.term
@@ -172,6 +180,8 @@ const TeacherResults = () => {
       console.error('Failed to update result', err, err?.response?.data);
       const msg = err?.response?.data?.message || 'Failed to update result.';
       toast.error(msg);
+    } finally {
+      setLoadingEdit(false);
     }
   };
 
@@ -254,9 +264,9 @@ const TeacherResults = () => {
 
   const calculateGrade = percentage => {
     if (percentage >= 90) return 'A+';
-    if (percentage >= 75) return 'A';
-    if (percentage >= 65) return 'B';
-    if (percentage >= 55) return 'C';
+    if (percentage >= 70) return 'A';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C';
     if (percentage >= 45) return 'D';
     if (percentage >= 40) return 'E';
     return 'F';
@@ -656,31 +666,32 @@ const TeacherResults = () => {
       teacherUid
     };
 
+    setLoadingSubmit(true);
     try {
       await api.post('/api/results', payload);
       toast.success('Result saved.');
 
       (async () => {
+        const studentIdOrUid = resolvedStudent?.id || resolvedStudent?.uid || formData.studentId;
         try {
-          const studentIdOrUid = resolvedStudent?.id || resolvedStudent?.uid || formData.studentId;
           await api.put(`/api/students/${encodeURIComponent(studentIdOrUid)}`, {
             lastResultSession: formData.session,
             lastResultTerm: formData.term
           });
+        } catch {}
 
-          setAllStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
-          setClassStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
-          try {
-            const cacheKey = `yms_students_cache_${currentUser.uid || currentUser.id || 'anon'}`;
-            const raw = localStorage.getItem(cacheKey);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (parsed && Array.isArray(parsed.allStudents)) {
-                parsed.allStudents = parsed.allStudents.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s);
-                localStorage.setItem(cacheKey, JSON.stringify(parsed));
-              }
+        setAllStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
+        setClassStudents(prev => prev.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s));
+        try {
+          const cacheKey = `yms_students_cache_${currentUser.uid || currentUser.id || 'anon'}`;
+          const raw = localStorage.getItem(cacheKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.allStudents)) {
+              parsed.allStudents = parsed.allStudents.map(s => (String(s.id) === String(studentIdOrUid) || String(s.uid) === String(studentIdOrUid)) ? { ...s, lastResultSession: formData.session, lastResultTerm: formData.term } : s);
+              localStorage.setItem(cacheKey, JSON.stringify(parsed));
             }
-          } catch {}
+          }
         } catch {}
       })();
 
@@ -702,6 +713,8 @@ const TeacherResults = () => {
       console.error('Failed to save result', err, err?.response?.data);
       const msg = err?.response?.data?.message || err?.response?.data?.error || 'Failed to save result.';
       toast.error(msg);
+    } finally {
+      setLoadingSubmit(false);
     }
   };
 
@@ -709,6 +722,7 @@ const TeacherResults = () => {
     if (!id) return;
     if (!window.confirm('Are you sure you want to delete this result?')) return;
 
+    setLoadingDeleteId(id);
     try {
       await api.delete(`/api/results/${encodeURIComponent(id)}`);
       setResults(prev => prev.filter(result => String(result.id) !== String(id)));
@@ -717,6 +731,8 @@ const TeacherResults = () => {
       console.error('Failed to delete result', err);
       const msg = err?.response?.data?.message || 'Failed to delete result.';
       toast.error(msg);
+    } finally {
+      setLoadingDeleteId(null);
     }
   };
 
@@ -733,6 +749,7 @@ const TeacherResults = () => {
 
   const handleSaveComment = async () => {
     if (!selectedResult) return;
+    setLoadingComment(true);
     try {
       const id = selectedResult.id || selectedResult._id;
       if (!id) throw new Error('Result id missing');
@@ -754,6 +771,8 @@ const TeacherResults = () => {
       console.error('Failed to save comment', err);
       const msg = err?.response?.data?.message || 'Failed to update comment.';
       toast.error(msg);
+    } finally {
+      setLoadingComment(false);
     }
   };
 
@@ -810,7 +829,7 @@ const TeacherResults = () => {
                 const { percentage, grade } = calculateOverallGrade(result.subjects);
 
                 return (
-                  <tr key={result.id || idx} className="align-top">
+                  <tr key={result.id || idx} onClick={() => handleEditClick(result)} className="align-top cursor-pointer hover:bg-gray-50">
                     <td className="px-3 py-3 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
                         <img
@@ -843,17 +862,21 @@ const TeacherResults = () => {
                       </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                      <button onClick={() => handleViewResult(result)} className="text-blue-600 hover:text-blue-900 p-1" aria-label="View result">
+                      <button onClick={(e) => { e.stopPropagation(); handleViewResult(result); }} className="text-blue-600 hover:text-blue-900 p-1" aria-label="View result">
                         <EyeIcon className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleOpenCommentModal(result)} className="text-green-600 hover:text-green-900 p-1" aria-label="Add comment">
+                      <button onClick={(e) => { e.stopPropagation(); handleOpenCommentModal(result); }} className="text-green-600 hover:text-green-900 p-1" aria-label="Add comment">
                         <MessageCircleIcon className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleEditClick(result)} className="text-indigo-600 hover:text-indigo-900 p-1" aria-label="Edit result">
+                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(result); }} className="text-indigo-600 hover:text-indigo-900 p-1" aria-label="Edit result">
                         <PencilIcon className="h-4 w-4" />
                       </button>
-                      <button onClick={() => handleDeleteResult(result.id)} className="text-red-600 hover:text-red-900 p-1" aria-label="Delete result">
-                        <TrashIcon className="h-4 w-4" />
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteResult(result.id); }} disabled={loadingDeleteId === (result.id || result._id)} className="text-red-600 hover:text-red-900 p-1" aria-label="Delete result">
+                        {loadingDeleteId === (result.id || result._id) ? (
+                          <span className="text-sm text-red-600">Deleting...</span>
+                        ) : (
+                          <TrashIcon className="h-4 w-4" />
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -986,7 +1009,9 @@ const TeacherResults = () => {
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-2 rounded border bg-white text-sm">Cancel</button>
-              <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Add Result</button>
+              <button type="submit" disabled={loadingSubmit} className="px-3 py-2 rounded bg-blue-600 text-white text-sm disabled:opacity-60">
+                {loadingSubmit ? 'Loading...' : 'Add Result'}
+              </button>
             </div>
           </div>
         </form>
@@ -998,25 +1023,10 @@ const TeacherResults = () => {
             <div className="grid grid-cols-1 gap-y-4 gap-x-4 sm:grid-cols-3">
               <div>
                 <label htmlFor="studentId_edit" className="block text-sm font-medium text-gray-700">Student</label>
-                <select 
-                  id="studentId_edit" 
-                  name="studentId" 
-                  required 
-                  value={formData.studentId} 
-                  onChange={handleStudentChange}
-                  disabled={loadingStudents}
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 rounded-md disabled:bg-gray-100 disabled:text-gray-500"
-                >
-                  <option value="">{loadingStudents ? 'Loading students...' : 'Select a student'}</option>
-                  {(isTeacher ? classStudents : allStudents).map(student => (
-                    <option key={student.id} value={String(student.id)}>
-                      {student.name} ({student.uid || student.id})
-                    </option>
-                  ))}
-                </select>
-                {(isTeacher ? classStudents : allStudents).length === 0 && !loadingStudents && (
-                  <p className="mt-2 text-sm text-gray-500">No students available</p>
-                )}
+                <div className="mt-1 block w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-gray-50 text-gray-700">
+                  {selectedStudent?.name || findStudentById(formData.studentId)?.name || 'Unknown Student'} 
+                  <span className="text-gray-500 text-xs ml-1">({selectedStudent?.uid || findStudentById(formData.studentId)?.uid || formData.studentId})</span>
+                </div>
               </div>
               <div>
                 <label htmlFor="session_edit" className="block text-sm font-medium text-gray-700">Session</label>
@@ -1089,7 +1099,9 @@ const TeacherResults = () => {
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 pt-4 border-t border-gray-100">
               <button type="button" onClick={() => { setShowEditModal(false); resetForm(); }} className="px-3 py-2 rounded border bg-white text-sm">Cancel</button>
-              <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Save Changes</button>
+              <button type="submit" disabled={loadingEdit} className="px-3 py-2 rounded bg-blue-600 text-white text-sm disabled:opacity-60">
+                {loadingEdit ? 'Loading...' : 'Save Changes'}
+              </button>
             </div>
           </div>
         </form>
