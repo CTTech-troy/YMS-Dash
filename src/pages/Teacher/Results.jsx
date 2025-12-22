@@ -337,7 +337,8 @@ const TeacherResults = () => {
         }
 
         // ====================================
-        // FETCH ALL STUDENTS FROM API (10 per load, cursor pagination)
+        // FETCH CLASS-FILTERED STUDENTS (server-side filter, cursor pagination)
+        // This reduces Firestore reads by filtering on the backend
         // ====================================
         let allStudentsArray = [];
         let nextToken = null;
@@ -345,8 +346,11 @@ const TeacherResults = () => {
         let pageCount = 0;
 
         try {
-          while (hasMore && pageCount < 100) { // safety limit: 100 pages
-            let url = '/api/students?limit=10';
+          // Fetch ONLY the teacher's class students to reduce Firestore reads
+          const classParam = assignedNorm ? `&class=${encodeURIComponent(assignedClass)}` : '';
+          
+          while (hasMore && pageCount < 10) { // limit to 10 pages max per class
+            let url = `/api/students?limit=25${classParam}`;
             if (nextToken) {
               url += `&startAfter=${encodeURIComponent(nextToken)}`;
             }
@@ -364,7 +368,7 @@ const TeacherResults = () => {
             
             if (Array.isArray(pageData) && pageData.length > 0) {
               allStudentsArray = allStudentsArray.concat(pageData);
-              console.debug('Loaded page of students:', {
+              console.debug('Loaded class students page:', {
                 pageNum: pageCount + 1,
                 pageCount: pageData.length,
                 totalSoFar: allStudentsArray.length
@@ -377,6 +381,7 @@ const TeacherResults = () => {
 
             if (!hasMore) {
               console.debug('Pagination complete:', { totalPages: pageCount, totalCount: allStudentsArray.length });
+              break;
             }
           }
         } catch (err) {
@@ -508,10 +513,28 @@ const TeacherResults = () => {
 
   const calculateOverallGrade = subjectsArr => {
     if (!subjectsArr || subjectsArr.length === 0) return { percentage: 0, grade: 'F' };
-    const totalPercentage = subjectsArr.reduce((sum, subject) => sum + (subject.percentage || 0), 0);
-    const overallPercentage = totalPercentage / subjectsArr.length;
-    const overallGrade = calculateGrade(overallPercentage);
-    return { percentage: parseFloat(overallPercentage.toFixed(1)), grade: overallGrade };
+
+    // Sum total marks obtained across all subjects. Support multiple field names.
+    const totalObtained = subjectsArr.reduce((sum, subject) => {
+      const sTotal = subject?.total ?? (
+        (subject?.firstTest || subject?.first || 0) +
+        (subject?.secondTest || subject?.second || 0) +
+        (subject?.thirdTest || subject?.third || 0) +
+        (subject?.exam || subject?.examScore || 0)
+      );
+      return sum + (Number(sTotal) || 0);
+    }, 0);
+
+    const maxPerSubject = 100; // fallback per-subject maximum
+    const totalMarksObtainable = (subjectsArr.length || 0) * maxPerSubject;
+
+    const overallPercentage = totalMarksObtainable > 0
+      ? (totalObtained / totalMarksObtainable) * 100
+      : 0;
+
+    const rounded = parseFloat(overallPercentage.toFixed(1));
+    const overallGrade = calculateGrade(rounded);
+    return { percentage: rounded, grade: overallGrade };
   };
 
   const normalizeStudentPicture = (pic) => {
@@ -813,7 +836,7 @@ const TeacherResults = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Pic</th>
+                {/* <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Pic</th> */}
                 <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
                 <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Term</th>
                 <th className="px-3 py-2 text-left text-xs sm:text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects</th>
@@ -825,12 +848,12 @@ const TeacherResults = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {results.map((result, idx) => {
                 const studentRecord = findStudentById(result.studentId) || findStudentById(result.studentUid) || { name: 'Unknown student', uid: result.studentUid || result.studentId || '' };
-                const avatarSrc = normalizeStudentPicture(studentRecord?.picture);
+                {/* const avatarSrc = normalizeStudentPicture(studentRecord?.picture); */}
                 const { percentage, grade } = calculateOverallGrade(result.subjects);
 
                 return (
                   <tr key={result.id || idx} onClick={() => handleEditClick(result)} className="align-top cursor-pointer hover:bg-gray-50">
-                    <td className="px-3 py-3 whitespace-nowrap">
+                    {/* <td className="px-3 py-3 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
                         <img
                           src={avatarSrc || '/images/default-avatar.png'}
@@ -838,7 +861,7 @@ const TeacherResults = () => {
                           className="h-8 w-8 rounded-full object-cover"
                         />
                       </div>
-                    </td>
+                    </td> */}
 
                     <td className="px-3 py-3 whitespace-nowrap max-w-[12rem]">
                       <div className="text-sm text-gray-900 truncate whitespace-nowrap">{studentRecord.name}</div>
@@ -1091,6 +1114,15 @@ const TeacherResults = () => {
                 </div>
               </>
             )}
+
+            <div className="mt-4">
+              <div className="mt-6 grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-3">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700">Overall Percentage</h4>
+                  <p className="mt-1 text-lg font-medium text-gray-900">{calculateOverallGrade(formData.subjects).percentage}%</p>
+                </div>
+              </div>
+            </div>
 
             <div className="mt-4">
               <label htmlFor="teacherComment_edit" className="block text-sm font-medium text-gray-700">Teacher's Comment</label>

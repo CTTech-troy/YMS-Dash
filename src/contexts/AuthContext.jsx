@@ -142,40 +142,31 @@ export const AuthProvider = ({ children }) => {
   };
 
   /**
-   * Student login (studentId + pin)
+   * Student login (uid + password + full student data)
    */
-  const studentLogin = async (studentId, pin) => {
+  const studentLogin = async (uid, password, studentData = {}) => {
     try {
-      const studentsRef = collection(db, "students");
-      const q = query(studentsRef, where("studentId", "==", studentId));
-      const snapshot = await getDocs(q);
-
-      if (!snapshot.empty) {
-        const studentDoc = snapshot.docs[0];
-        const studentData = studentDoc.data();
-
-        if (studentData.pinHash) {
-          const pinMatch = await bcrypt.compare(pin, studentData.pinHash);
-          if (!pinMatch) return { success: false, message: "Invalid PIN" };
-        } else if (studentData.pin) {
-          if (studentData.pin !== pin) return { success: false, message: "Invalid PIN" };
-        }
-
-        const loggedInStudent = {
-          id: studentDoc.id,
-          name: studentData.name,
-          studentId: studentData.studentId,
-          role: "student",
-          class: studentData.class || null,
-        };
-
-        setCurrentUser(loggedInStudent);
-        setUserRole("student");
-        localStorage.setItem("schoolUser", JSON.stringify(loggedInStudent));
-        return { success: true, user: loggedInStudent };
+      // Accept default password 'student123'
+      if (password !== 'student123') {
+        return { success: false, message: "Invalid password" };
       }
 
-      return { success: false, message: "Student not found" };
+      const loggedInStudent = {
+        id: uid,
+        name: studentData.name || studentData.studentName || uid,
+        studentName: studentData.studentName || studentData.name || uid,
+        uid: uid,
+        role: "student",
+        class: studentData.class || studentData.studentClass || null,
+        studentClass: studentData.studentClass || studentData.class || null,
+        picture: studentData.picture || null,
+        fees: studentData.fees || { total: 0, paid: 0, pending: 0 },
+      };
+
+      setCurrentUser(loggedInStudent);
+      setUserRole("student");
+      localStorage.setItem("schoolUser", JSON.stringify(loggedInStudent));
+      return { success: true, user: loggedInStudent };
     } catch (err) {
       console.error("Student login error:", err);
       return { success: false, message: "Failed to login. Try again." };
@@ -188,6 +179,20 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("schoolUser");
   };
 
+  // Update currentUser fields (merge) and persist to localStorage
+  const updateUserFields = (fields = {}) => {
+    try {
+      setCurrentUser(prev => {
+        if (!prev) return prev;
+        const updated = { ...prev, ...fields };
+        try { localStorage.setItem('schoolUser', JSON.stringify(updated)); } catch {}
+        return updated;
+      });
+    } catch (e) {
+      console.error('Failed to update user fields', e);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -196,6 +201,7 @@ export const AuthProvider = ({ children }) => {
         login,
         studentLogin,
         logout,
+        updateUserFields,
         loading,
       }}
     >

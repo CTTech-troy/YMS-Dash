@@ -35,10 +35,21 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   return children;
 };
 
+// Guard component that waits for AuthContext to load
+function LoadingGuard() {
+  const { loading } = useAuth();
+  
+  if (loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', fontSize: '16px' }}>Loading...</div>;
+  }
+
+  return <MainApp />;
+}
+
 function App() {
   return (
     <AuthProvider>
-      <MainApp />
+      <LoadingGuard />
     </AuthProvider>
   );
 }

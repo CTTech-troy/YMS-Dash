@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { toast } from "sonner";
 import { Lock, Eye, EyeOff } from "lucide-react";
 import Swal from "sweetalert2";
-import  ResultSheet from "../../pages/Student/ResultChecker";
+import StudentDashboard from "../../pages/Student/StudentDashboard";
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-a2x4.onrender.com';
 
@@ -12,13 +12,15 @@ const Login = () => {
   const [formData, setFormData] = useState({
     uid: "",
     password: "",
-    studentId: "",
-    pin: "",
+    studentUid: "",
+    studentPassword: "",
   });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [resultData, setResultData] = useState(null);
+  const [studentDashboardData, setStudentDashboardData] = useState(null);
+  const [studentPreview, setStudentPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // defensively get auth and avoid destructuring from null
   const auth = useAuth();
@@ -31,8 +33,8 @@ const Login = () => {
       if (!formData.uid) errs.uid = "UID is required";
       if (!formData.password) errs.password = "Password is required";
     } else {
-      if (!formData.studentId) errs.studentId = "Student ID is required";
-      if (!formData.pin) errs.pin = "PIN is required";
+      if (!formData.studentUid) errs.studentUid = "Student UID is required";
+      if (!formData.studentPassword) errs.studentPassword = "Password is required";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -46,34 +48,50 @@ const Login = () => {
   const togglePasswordVisibility = () => setShowPassword((s) => !s);
 
   // ========================================
-  // HELPER: Convert result to ResultSheet format
+  // HELPER: Normalize student UID
   // ========================================
-  const mapResultToSheet = (result, student) => {
-    return {
-      studentPhoto: student?.picture || '/images/default-avatar.png',
-      studentName: result.studentName || student?.name || 'Unknown',
-      uid: result.studentUid || student?.uid || result.studentId,
-      className: result.studentClass || student?.class || 'N/A',
-      term: result.term || 'N/A',
-      session: result.session || 'N/A',
-      positionInClass: '—', // Not available from result data
-      subjects: Array.isArray(result.subjects) 
-        ? result.subjects.map(s => ({
-            subjectName: s.name || s.title || 'Unknown',
-            test1Score: s.firstTest || 0,
-            test2Score: s.secondTest || 0,
-            test3Score: s.thirdTest || 0,
-            examScore: s.exam || 0,
-            totalScore: s.total || 0,
-            grade: s.grade || 'F',
-            teacherRemark: s.remark || ''
-          }))
-        : [],
-      teacherComment: result.teacherComment || 'No comment provided',
-      principalComment: result.principalComment || 'No comment provided',
-      currentViews: 1,
-      maxViews: 3
-    };
+  const normalizeUid = (uid) => {
+    return uid.trim().replace(/\s+/g, '');
+  };
+
+  // Fetch a preview of student info from results API when UID is provided (on blur)
+  const fetchStudentPreview = async (rawUid) => {
+    const normalizedUid = normalizeUid(rawUid || '');
+    if (!normalizedUid) {
+      setStudentPreview(null);
+      return;
+    }
+
+    setPreviewLoading(true);
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'https://yms-backend-a2x4.onrender.com';
+      const resp = await fetch(`${API_BASE}/api/results?studentUid=${encodeURIComponent(normalizedUid)}`);
+      if (!resp.ok) {
+        setStudentPreview(null);
+        return;
+      }
+      const data = await resp.json().catch(() => null);
+      const results = Array.isArray(data) ? data : (data?.data || data?.results || []);
+      if (!results || results.length === 0) {
+        setStudentPreview(null);
+        return;
+      }
+
+      const first = results[0];
+      const preview = {
+        uid: normalizedUid,
+        name: (first?.studentName || first?.studentname || first?.name || 'Unknown').trim(),
+        class: (first?.studentClass || first?.studentclass || first?.class || 'N/A').trim(),
+        session: first?.session || first?.academicSession || null,
+        term: first?.term || first?.academicTerm || null,
+      };
+      setStudentPreview(preview);
+    } catch (e) {
+      console.error('Preview fetch failed', e);
+      setStudentPreview(null);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -104,135 +122,239 @@ const Login = () => {
           toast.error(res?.message || "Login failed");
         }
       } else {
-        // Student flow:
-        // 1) Verify student exists
-        // 2) Check if result exists for this student
-        // 3) Check if result is published
-        // 4) Verify scratchcard PIN
-        // 5) Mark scratchcard used
-        // 6) Display result using ResultSheet component
+        // Student login flow:
+        // 1) Normalize student UID
+        // 2) Fetch results from API
+        // 3) Extract student data
+        // 4) Validate password
+        // 5) Login and display dashboard
 
         try {
-          console.debug('Student login flow starting', { studentId: formData.studentId });
+          const normalizedUid = normalizeUid(formData.studentUid);
+          console.log('=== STUDENT LOGIN PROCESS STARTED ===');
+          console.log('Normalized UID:', normalizedUid);
 
           // ========================================
-          // STEP 1: Check student exists
+          // STEP 1: Fetch results first to get student data
           // ========================================
-          const studentResp = await fetch(
-            `${API_BASE}/api/students/${encodeURIComponent(formData.studentId)}`
-          );
-          if (!studentResp.ok) {
-            const errBody = await studentResp.json().catch(() => ({}));
-            toast.error(errBody.message || "Student not found");
+          console.log(`STEP 1: Fetching results from ${API_BASE}/api/results?studentUid=${normalizedUid}`);
+          
+          let resultsResp;
+          try {
+            resultsResp = await fetch(
+              `${API_BASE}/api/results?studentUid=${encodeURIComponent(normalizedUid)}`
+            );
+            console.log('Results API Response Status:', resultsResp.status, resultsResp.statusText);
+          } catch (fetchError) {
+            console.error('Network error while fetching results:', fetchError);
+            toast.error(`Network error: ${fetchError.message}`);
             return;
           }
-          const studentData = await studentResp.json();
-          console.debug('Student found:', { name: studentData.name, uid: studentData.uid });
 
-          // ========================================
-          // STEP 2: Check if result exists for this student
-          // ========================================
-          const resultsResp = await fetch(
-            `${API_BASE}/api/results?studentId=${encodeURIComponent(formData.studentId)}`
-          );
           if (!resultsResp.ok) {
-            toast.error("Could not fetch results");
+            const errorText = await resultsResp.text().catch(() => 'No error details');
+            console.error('Results API Error Response:', {
+              status: resultsResp.status,
+              statusText: resultsResp.statusText,
+              body: errorText
+            });
+            toast.error(`Failed to fetch results (HTTP ${resultsResp.status}). Check console for details.`);
             return;
           }
-          const resultsData = await resultsResp.json();
-          const results = Array.isArray(resultsData) 
+
+          let resultsData;
+          try {
+            resultsData = await resultsResp.json();
+            console.log('Results API Response Data:', resultsData);
+          } catch (parseError) {
+            console.error('Error parsing results JSON:', parseError);
+            toast.error('Invalid response from results API');
+            return;
+          }
+
+          const rawResults = Array.isArray(resultsData) 
             ? resultsData 
             : (resultsData.data || resultsData.results || []);
 
+          // Normalize each result record to canonical keys we use in the UI/state
+          const normalizedResults = rawResults.map(r => ({
+            // identity
+            studentName: (r.studentName || r.studentname || r.name || r.fullName || r.student || 'Unknown').trim(),
+            studentClass: (r.studentClass || r.studentclass || r.class || 'N/A').trim(),
+            studentUid: r.studentUid || r.studentuid || r.uid || null,
+            studentId: r.studentId || r.studentid || r.id || null,
+            // comments & meta
+            teacherComment: r.teacherComment || r.teacher_comment || r.comment || r.teacherRemark || null,
+            principalComment: r.principalComment || r.principal_comment || null,
+            teacherUid: r.teacherUid || r.teacher_uid || r.teacher || null,
+            // commentStatus: try to preserve truthy meaning for strings like 'true'/'yes'
+            commentStatus: (() => {
+              const v = r.commentStatus ?? r.comment_status ?? r.commentsAvailable;
+              if (typeof v === 'boolean') return v;
+              if (typeof v === 'string') return ['true','yes','1'].includes(v.toLowerCase());
+              return Boolean(v);
+            })(),
+            // published: keep as 'yes'/'no' strings so UI matches backend values
+            published: (() => {
+              const v = r.published ?? (r.isPublished === true ? 'yes' : (r.isPublished === false ? 'no' : undefined));
+              if (typeof v === 'boolean') return v ? 'yes' : 'no';
+              if (typeof v === 'string') return ['yes','true','1'].includes(v.toLowerCase()) ? 'yes' : 'no';
+              return r.published || (r.isPublished ? 'yes' : 'no');
+            })(),
+            createdAt: r.createdAt || r.created_at || r.created || null,
+            publishedAt: r.publishedAt || r.published_at || r.publishedAt || null,
+            session: r.session || r.academicSession || null,
+            term: r.term || r.academicTerm || null,
+            subjects: r.subjects || r.subject_list || r.subjectsArray || [],
+            // keep original payload for any other fields
+            ...r,
+          }));
+
+          const results = normalizedResults;
+
+          console.log('Parsed Results:', {
+            isArray: Array.isArray(resultsData),
+            resultsCount: results.length,
+            firstResult: results[0] ? {
+              studentName: results[0]?.studentName,
+              studentClass: results[0]?.studentClass,
+              studentUid: results[0]?.studentUid,
+              session: results[0]?.session,
+              term: results[0]?.term
+            } : null
+          });
+
           if (!results || results.length === 0) {
-            toast.error("No results found for this student");
+            console.warn('No results found for UID:', normalizedUid);
+            toast.error("No results found for this UID. Please verify your UID is correct.");
             return;
           }
 
-          // Get the first result (or most recent)
-          const result = results[0];
-          console.debug('Result found:', { 
-            id: result.id, 
-            published: result.published, 
-            session: result.session 
+          console.log('✓ Results fetched successfully:', results.length, 'result(s) found');
+
+          // ========================================
+          // STEP 2: Extract student data from results API
+          // ========================================
+          console.log('STEP 2: Extracting student data from results');
+          
+          const first = results[0];
+          const studentData = {
+            uid: first?.studentUid || normalizedUid,
+            studentUid: first?.studentUid || normalizedUid,
+            studentId: first?.studentId || first?.id || null,
+            name: (first?.studentName || 'Unknown').trim(),
+             studentName: (first?.studentName || 'Unknown').trim(),
+            class: (first?.studentClass || 'N/A').trim(),
+             studentClass: (first?.studentClass || 'N/A').trim(),
+            session: first?.session || null,
+            term: first?.term || null,
+            picture: first?.studentPhoto || '/images/default-avatar.png',
+            fees: first?.fees || { total: 0, paid: 0, pending: 0 },
+            // include common meta so dashboard receives API data
+            commentStatus: first?.commentStatus,
+            createdAt: first?.createdAt,
+            principalComment: first?.principalComment,
+            published: first?.published,
+            publishedAt: first?.publishedAt,
+            teacherComment: first?.teacherComment,
+            teacherUid: first?.teacherUid,
+          };
+
+          console.log('✓ Student data extracted:', studentData);
+
+          // ========================================
+          // STEP 3: Validate password
+          // ========================================
+          console.log('STEP 3: Validating password');
+          
+          if (!formData.studentPassword) {
+            console.warn('Password field is empty');
+            toast.error('Password is required');
+            return;
+          }
+
+          if (formData.studentPassword !== 'student123') {
+            console.warn('Password validation failed for UID:', normalizedUid);
+            toast.error("Invalid password. Default password is 'student123'");
+            return;
+          }
+
+          console.log('✓ Password validated successfully');
+
+          // ========================================
+          // STEP 4: Login student using context
+          // ========================================
+          console.log('STEP 4: Logging in student via AuthContext');
+          
+          if (typeof studentLogin !== "function") {
+            console.error('studentLogin function not available');
+            toast.error("Authentication service not available");
+            return;
+          }
+
+          const loginResult = await studentLogin(normalizedUid, formData.studentPassword, studentData);
+          console.log('Login Result:', loginResult);
+
+          if (!loginResult?.success) {
+            console.error('Student login failed:', loginResult?.message);
+            toast.error(loginResult?.message || "Login failed");
+            return;
+          }
+
+          console.log('✓ Student logged in successfully');
+
+          // ========================================
+          // STEP 5: Prepare dashboard data
+          // ========================================
+          console.log('STEP 5: Preparing dashboard data');
+          
+          const updatedStudentData = {
+            ...studentData,
+            uid: first?.studentUid || normalizedUid,
+            studentUid: first?.studentUid || normalizedUid,
+            name: (first?.studentName || 'Unknown').trim(),
+            studentName: (first?.studentName || 'Unknown').trim(),
+            class: (first?.studentClass || 'N/A').trim(),
+            studentClass: (first?.studentClass || 'N/A').trim(),
+            picture: first?.studentPhoto || '/images/default-avatar.png',
+          };
+
+          const dashboardData = {
+            student: updatedStudentData,
+            allResults: results,
+          };
+
+          console.log('✓ Dashboard data prepared:', {
+            studentName: updatedStudentData.name,
+            studentClass: updatedStudentData.class,
+            totalResults: results.length
           });
 
-          // ========================================
-          // STEP 3: Check if result is published
-          // ========================================
-          if (result.published !== 'yes' && result.published !== 'published') {
-            toast.error("Your result has not been published yet. Please contact the school office.");
-            return;
+          console.log('=== LOGGED IN STUDENT DETAILS ===');
+          console.log('Name:', updatedStudentData.name);
+          console.log('UID:', updatedStudentData.studentUid);
+          console.log('Class:', updatedStudentData.class);
+          console.log('Full student data:', updatedStudentData);
+          console.log('==============================');
+
+          setStudentDashboardData(dashboardData);
+          try {
+            const storageKey = `yms_student_dashboard_${first?.studentUid || normalizedUid}`;
+            localStorage.setItem(storageKey, JSON.stringify(dashboardData));
+          } catch (err) {
+            console.error('Failed to persist student dashboard data', err);
           }
-
-          // ========================================
-          // STEP 4: Verify scratchcard PIN
-          // ========================================
-          const verifyResp = await fetch(`${API_BASE}/api/scratchcards/verify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pin: formData.pin }),
-          });
-
-          if (!verifyResp.ok) {
-            const errBody = await verifyResp.json().catch(() => ({}));
-            toast.error(errBody.message || "Invalid PIN");
-            return;
-          }
-
-          const verifyData = await verifyResp.json();
-          console.debug('PIN verified:', { cardId: verifyData.id, valid: verifyData.valid });
-
-          if (!verifyData.valid) {
-            toast.error("Invalid PIN");
-            return;
-          }
-          if (verifyData.used) {
-            toast.error("This PIN has already been used");
-            return;
-          }
-
-          // ========================================
-          // STEP 5: Mark scratchcard as used
-          // ========================================
-          const useResp = await fetch(
-            `${API_BASE}/api/scratchcards/${encodeURIComponent(verifyData.id)}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                used: true,
-                usedBy: formData.studentId,
-                usedAt: new Date().toISOString(),
-              }),
-            }
-          );
-
-          if (!useResp.ok) {
-            const errBody = await useResp.json().catch(() => ({}));
-            toast.error(errBody.message || "Failed to mark PIN as used");
-            return;
-          }
-
-          console.debug('PIN marked as used');
-
-          // ========================================
-          // STEP 6: Optional context-based login
-          // ========================================
-          if (typeof studentLogin === "function") {
-            await studentLogin(formData.studentId);
-          }
-
-          // ========================================
-          // STEP 7: Display result using ResultSheet
-          // ========================================
-          const sheetData = mapResultToSheet(result, studentData);
-          setResultData(sheetData);
-
-          toast.success(`Welcome ${studentData.name || formData.studentId}`);
-        } catch (innerErr) {
-          console.error('Student login error:', innerErr);
-          toast.error(innerErr?.message || "Student login failed");
+          
+          console.log('=== STUDENT LOGIN PROCESS COMPLETED SUCCESSFULLY ===');
+          toast.success(`Welcome ${updatedStudentData.name || 'Student'}!`);
+        } catch (outerErr) {
+          console.error('=== STUDENT LOGIN PROCESS FAILED ===');
+          console.error('Error Type:', outerErr.constructor.name);
+          console.error('Error Message:', outerErr.message);
+          console.error('Error Stack:', outerErr.stack);
+          console.error('Full Error:', outerErr);
+          
+          toast.error(outerErr?.message || "An unexpected error occurred. Check browser console for details.");
         }
       }
     } catch (err) {
@@ -243,26 +365,49 @@ const Login = () => {
   };
 
   // ========================================
-  // HANDLERS: ResultSheet actions
+  // HANDLERS: StudentDashboard actions
   // ========================================
-  const handleResultCancel = () => {
-    setResultData(null);
-    setFormData({ uid: "", password: "", studentId: "", pin: "" });
+  const handleDashboardLogout = () => {
+    try {
+      const uid = studentDashboardData?.student?.uid || studentDashboardData?.student?.studentUid;
+      if (uid) {
+        const storageKey = `yms_student_dashboard_${uid}`;
+        localStorage.removeItem(storageKey);
+      }
+    } catch (e) {
+      console.error('Failed to remove persisted dashboard data', e);
+    }
+    setStudentDashboardData(null);
+    setFormData({ uid: "", password: "", studentUid: "", studentPassword: "" });
   };
 
-  const handleResultDownload = () => {
-    toast.success("Download feature coming soon!");
-    // TODO: implement PDF download
-  };
+  // Restore persisted student dashboard state (if any) when component mounts
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem('schoolUser');
+      if (storedUser) {
+        const parsed = JSON.parse(storedUser);
+        if (parsed && parsed.role === 'student' && parsed.uid) {
+          const storageKey = `yms_student_dashboard_${parsed.uid}`;
+          const saved = localStorage.getItem(storageKey);
+          if (saved) {
+            const parsedDashboard = JSON.parse(saved);
+            if (parsedDashboard) setStudentDashboardData(parsedDashboard);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to restore persisted dashboard state', err);
+    }
+  }, []);
 
-  // Show ResultSheet if result data exists
-  if (resultData) {
+  // Show StudentDashboard if data exists
+  if (studentDashboardData) {
     return (
-      <ResultSheet
-        data={resultData}
-        onCancel={handleResultCancel}
-        onDownload={handleResultDownload}
-        data-id={resultData.uid}
+      <StudentDashboard
+        student={studentDashboardData.student}
+        results={studentDashboardData.allResults}
+        onLogout={handleDashboardLogout}
       />
     );
   }
@@ -320,48 +465,72 @@ const Login = () => {
 
             {/* Login Form */}
             <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Preview box */}
+                    {previewLoading && (
+                      <p className="mt-2 text-sm text-gray-500">Checking UID...</p>
+                    )}
+                    {studentPreview && !previewLoading && (
+                      <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded">
+                        <p className="text-sm text-gray-600">Found student</p>
+                        <p className="font-medium text-gray-900">{studentPreview.name}</p>
+                        <p className="text-xs text-gray-600">Class: {studentPreview.class} • UID: {studentPreview.uid}</p>
+                        {studentPreview.session && <p className="text-xs text-gray-500 mt-1">Session: {studentPreview.session} • Term: {studentPreview.term || 'N/A'}</p>}
+                      </div>
+                    )}
               {tab === "student" ? (
                 <>
                   <div>
-                    <label htmlFor="studentId" className="block text-sm font-medium text-gray-700 mb-1">
-                      Student ID
+                    <label htmlFor="studentUid" className="block text-sm font-medium text-gray-700 mb-1">
+                      Student UID
                     </label>
                     <input
                       type="text"
-                      id="studentId"
-                      name="studentId"
-                      value={formData.studentId}
-                      onChange={handleChange}
-                      placeholder="Enter your student ID"
-                      className={`pl-3 pr-4 py-3 w-full rounded-lg border ${errors.studentId ? "border-red-500" : "border-gray-300"} focus:outline-none focus:ring-2 focus:ring-green-500`}
+                      id="studentUid"
+                      name="studentUid"
+                      value={formData.studentUid}
+                      onChange={(e) => {
+                        // keep raw input but normalize on blur/preview
+                        handleChange(e);
+                      }}
+                      onBlur={(e) => {
+                        const normalized = normalizeUid(e.target.value || '');
+                        // update field with normalized value for consistency
+                        setFormData(s => ({ ...s, studentUid: normalized }));
+                        // fetch preview info
+                        fetchStudentPreview(normalized);
+                      }}
+                      placeholder="Enter your student UID"
+                      className={`pl-3 pr-4 py-3 w-full rounded-lg border ${errors.studentUid ? "border-red-500" : "border-gray-300"} focus:outline-none focus:ring-2 focus:ring-green-500`}
                     />
-                    {errors.studentId && <p className="mt-1 text-sm text-red-600">{errors.studentId}</p>}
+                    {errors.studentUid && <p className="mt-1 text-sm text-red-600">{errors.studentUid}</p>}
+
+                    
                   </div>
 
                   <div>
-                    <label htmlFor="pin" className="block text-sm font-medium text-gray-700 mb-1">
-                      Scratch Card PIN
+                    <label htmlFor="studentPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                      Password
                     </label>
                     <div className="relative">
                       <input
                         type={showPassword ? "text" : "password"}
-                        id="pin"
-                        name="pin"
-                        value={formData.pin}
+                        id="studentPassword"
+                        name="studentPassword"
+                        value={formData.studentPassword}
                         onChange={handleChange}
-                        placeholder="Enter your PIN"
-                        className={`pl-3 pr-12 py-3 w-full rounded-lg border ${errors.pin ? "border-red-500" : "border-gray-300"} focus:outline-none focus:ring-2 focus:ring-green-500`}
+                        placeholder="Enter your password"
+                        className={`pl-3 pr-12 py-3 w-full rounded-lg border ${errors.studentPassword ? "border-red-500" : "border-gray-300"} focus:outline-none focus:ring-2 focus:ring-green-500`}
                       />
                       <button 
                         type="button" 
                         onClick={togglePasswordVisibility} 
-                        aria-label={showPassword ? "Hide PIN" : "Show PIN"} 
+                        aria-label={showPassword ? "Hide password" : "Show password"} 
                         className="absolute inset-y-0 right-0 pr-3 flex items-center"
                       >
                         {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                       </button>
                     </div>
-                    {errors.pin && <p className="mt-1 text-sm text-red-600">{errors.pin}</p>}
+                    {errors.studentPassword && <p className="mt-1 text-sm text-red-600">{errors.studentPassword}</p>}
                   </div>
                 </>
               ) : (
@@ -423,7 +592,7 @@ const Login = () => {
             <div className="mt-6 text-center text-sm text-gray-600">
               <p>
                 {tab === "student"
-                  ? "Parents: Contact the school office if your child needs access credentials."
+                  ? "Enter your UID to view your academic results and performance. Initial password: student123"
                   : "Staff: Contact the IT department if you need assistance with your account."}
               </p>
             </div>

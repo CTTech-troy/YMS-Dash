@@ -113,26 +113,7 @@ const StudentDashboard = () => {
                 </div>
               </dd>
             </div>
-            <div className="sm:col-span-2">
-              <dt className="text-sm font-medium text-gray-500">Fee Status</dt>
-              <dd className="mt-1 text-sm text-gray-900">
-                <div className="flex flex-col">
-                  <div className="flex justify-between mb-1">
-                    <span>Paid: ${studentInfo.fees.paid}</span>
-                    <span>Pending: ${studentInfo.fees.pending}</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div className="bg-blue-600 h-2.5 rounded-full" style={{
-                    width: `${studentInfo.fees.paid / studentInfo.fees.total * 100}%`
-                  }}></div>
-                  </div>
-                  <div className="text-xs mt-1 text-gray-500">
-                    Due date:{' '}
-                    {new Date(studentInfo.fees.dueDate).toLocaleDateString()}
-                  </div>
-                </div>
-              </dd>
-            </div>
+            
           </dl>
         </div>
       </div>
