@@ -11,6 +11,7 @@ import StudentManagement from './pages/Admin/StudentManagement';
 import SubjectManagement from './pages/Admin/SubjectManagement';
 import ResultManagement from './pages/Admin/ResultManagement';
 import ScratchCardManagement from './pages/Admin/ScratchCardManagement';
+import PortalSettings from './pages/Admin/PortalSettings';
 import ClassAssignment from './pages/Admin/ClassAssignment';
 import TeacherClasses from './pages/Teacher/Classes';
 import TeacherResults from './pages/Teacher/Results';
@@ -18,6 +19,7 @@ import Attendance from './pages/Teacher/Attendance';
 import TeacherProfile from './pages/Teacher/Profile';
 import ResultChecker from './pages/Student/ResultChecker';
 import { Toaster } from 'sonner';
+import { PageLoader } from './components/ui/Spinner';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -40,7 +42,7 @@ function LoadingGuard() {
   const { loading } = useAuth();
   
   if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', fontSize: '16px' }}>Loading...</div>;
+    return <PageLoader />;
   }
 
   return <MainApp />;
@@ -72,6 +74,7 @@ function MainApp() {
           <Route path="/admin/subjects" element={<ProtectedRoute allowedRoles={['admin']}><SubjectManagement /></ProtectedRoute>} />
           <Route path="/admin/results" element={<ProtectedRoute allowedRoles={['admin']}><ResultManagement /></ProtectedRoute>} />
           <Route path="/admin/scratch-cards" element={<ProtectedRoute allowedRoles={['admin']}><ScratchCardManagement /></ProtectedRoute>} />
+          <Route path="/admin/portal-settings" element={<ProtectedRoute allowedRoles={['admin']}><PortalSettings /></ProtectedRoute>} />
           <Route path="/admin/class-assignment" element={<ProtectedRoute allowedRoles={['admin']}><ClassAssignment /></ProtectedRoute>} />
 
           {/* Teacher Routes */}

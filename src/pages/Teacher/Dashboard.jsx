@@ -3,9 +3,12 @@ import DashboardLayout from '../../components/DashboardLayout';
 import { UsersIcon, BookOpenIcon, ClipboardListIcon, CalendarIcon, BellIcon } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-// import { toast } from 'sonner';
-
-const API_BASE = import.meta.env.VITE_API_URL || ' https://yms-backend-a2x4.onrender.com';
+import { API_BASE } from '../../config/api.js';
+import api from '../../api/axios';
+import { normalizeClassLabel, canonicalClassKey, resolveClassFromRecord } from '../../utils/schoolClass';
+import { Card } from '../../components/ui/Card';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Button } from '../../components/ui/Button';
 
 // Sample fallback data
 const fallbackAssignedClass = {
@@ -49,139 +52,124 @@ const TeacherDashboard = () => {
   const [assignedStudentsCount, setAssignedStudentsCount] = useState(undefined);
   const [teacherSubjectCount, setTeacherSubjectCount] = useState(undefined);
 
-  // Normalizers: trim + lowercase canonical fields
-  const normalizeClassValue = (c) => String(c ?? '').trim().toLowerCase();
   const normalizeStudent = (s) => {
     if (!s || typeof s !== 'object') return s;
-    const unified = normalizeClassValue(s.class || s.studentClass || s.className || s.grade);
+    const unified = normalizeClassLabel(resolveClassFromRecord(s));
     return { ...s, class: unified };
   };
 
-
-
-  // fetch counts: students in assigned class and subjects added by this teacher
   useEffect(() => {
-    if (!teacherProfile) {
+    if (!currentUser || userRole !== 'teacher') {
       setAssignedStudentsCount(undefined);
       setTeacherSubjectCount(undefined);
       return;
     }
 
-    const fetchCounts = async () => {
-      // canonical assigned class (lowercase, trimmed)
-      const assignedClass = normalizeClassValue(teacherProfile.assignedClass);
-      // helper list for principals
-      const principalClasses = ['jss1','jss2','jss3','ss1','ss2','ss3'];
+    let cancelled = false;
 
-      console.debug('fetchCounts starting:', { assignedClass, teacherProfile: teacherProfile.name });
+    const loadRosterAndSubjectCounts = async () => {
+      setAssignedStudentsCount(undefined);
+      setTeacherSubjectCount(undefined);
 
-      // ========================================
-      // 1) STUDENTS COUNT
-      // ========================================
       try {
-        let studentList = [];
+        const uid = currentUser.uid || currentUser.id;
+        let assignedClassRaw = currentUser.assignedClass || currentUser.class || '';
 
-        // Try to fetch students from API
-        try {
-          const res = await fetch(`${API_BASE}/api/students`);
-          if (res.ok) {
-            const json = await res.json();
-            studentList = Array.isArray(json) ? json : (json?.data || json?.students || []);
-          }
-        } catch (e) {
-          console.warn('Failed to fetch students from /api/students', e);
-          studentList = [];
-        }
-
-        // Normalize all students
-        const normalizedStudents = studentList.map(normalizeStudent);
-
-        console.debug('fetchCounts: fetched & normalized students', {
-          total: normalizedStudents.length,
-          classes: [...new Set(normalizedStudents.map(s => s.class))]
-        });
-
-        // Filter by teacher's assigned class
-        let filteredStudents = [];
-        
-        if (assignedClass === 'admin') {
-          // Admin sees all students
-          filteredStudents = normalizedStudents;
-        } else if (assignedClass === 'principal' || assignedClass === 'headmaster' || assignedClass === 'head') {
-          // Principal sees only standard classes (JSS1-SS3)
-          filteredStudents = normalizedStudents.filter(s => principalClasses.includes(s.class));
-        } else if (assignedClass && assignedClass !== '') {
-          // Teacher with specific assigned class
-          filteredStudents = normalizedStudents.filter(s => s.class === assignedClass);
-        } else {
-          // No assigned class -> show all
-          filteredStudents = normalizedStudents;
-        }
-
-        console.debug('fetchCounts: student count result', {
-          assignedClass,
-          filteredCount: filteredStudents.length,
-          studentNames: filteredStudents.map(s => ({ name: s.name, class: s.class }))
-        });
-
-        setAssignedStudentsCount(filteredStudents.length);
-      } catch (e) {
-        console.warn('Failed to compute assigned students count', e);
-        setAssignedStudentsCount(0);
-      }
-
-      // ========================================
-      // 2) SUBJECTS COUNT
-      // ========================================
-      try {
-        const teacherId = teacherProfile.id ?? teacherProfile.uid ?? null;
-        let subjectList = [];
-
-        if (teacherId) {
-          // Try to fetch subjects for this teacher
+        if (uid) {
           try {
-            const res = await fetch(`${API_BASE}/api/subjects?teacher=${encodeURIComponent(teacherId)}`);
-            if (res.ok) {
-              const json = await res.json();
-              subjectList = Array.isArray(json) ? json : (json?.data || json?.subjects || []);
+            let tRes = await api.get(`/api/teachers/${encodeURIComponent(uid)}`);
+            let tData = tRes.data;
+            if (!tData || (Array.isArray(tData) && tData.length === 0)) {
+              tRes = await api.get('/api/teachers', { params: { uid } });
+              tData = tRes.data;
             }
-          } catch (e) {
-            console.warn('Failed to fetch subjects for teacher', e);
-          }
-
-          // Fallback: try without filter
-          if (subjectList.length === 0) {
-            try {
-              const res = await fetch(`${API_BASE}/api/subjects`);
-              if (res.ok) {
-                const json = await res.json();
-                const allSubjects = Array.isArray(json) ? json : (json?.data || json?.subjects || []);
-                // Filter by teacher ID
-                subjectList = allSubjects.filter(s => 
-                  (s.teacher === teacherId || s.teacherId === teacherId || s.teacherUid === teacherId)
-                );
-              }
-            } catch (e) {
-              console.warn('Failed to fetch all subjects', e);
-            }
+            const teacher = Array.isArray(tData) ? tData[0] : tData;
+            assignedClassRaw = teacher?.assignedClass || teacher?.classAssigned || teacher?.class || assignedClassRaw;
+          } catch {
+            /* keep currentUser fallbacks */
           }
         }
 
-        console.debug('fetchCounts: subject count result', {
-          teacherId,
-          subjectCount: subjectList.length,
-          subjects: subjectList.map(s => ({ name: s.name, id: s.id }))
+        const teacherClassKey = canonicalClassKey(assignedClassRaw);
+        const adminLike = ['admin', 'principal', 'headmaster', 'head'].includes(teacherClassKey);
+
+        let allStudentsArray = [];
+        let nextToken = null;
+        let hasMore = true;
+        let pageCount = 0;
+
+        while (hasMore && pageCount < 200) {
+          let url = '/api/students?limit=25';
+          if (nextToken) url += `&startAfter=${encodeURIComponent(nextToken)}`;
+
+          const sRes = await api.get(url);
+          const raw = sRes.data;
+          const pageData = Array.isArray(raw)
+            ? raw
+            : (Array.isArray(raw?.data) ? raw.data : (Array.isArray(raw?.students) ? raw.students : []));
+
+          if (Array.isArray(pageData) && pageData.length > 0) {
+            allStudentsArray = allStudentsArray.concat(pageData);
+          }
+
+          nextToken = raw?.nextPageToken || null;
+          hasMore = raw?.hasMore === true;
+          pageCount += 1;
+          if (!hasMore) break;
+        }
+
+        const normalized = allStudentsArray.map((s) => {
+          const detectedClass = normalizeClassLabel(resolveClassFromRecord(s));
+          const classKey = canonicalClassKey(s);
+          return { ...s, class: detectedClass, classKey };
         });
 
-        setTeacherSubjectCount(subjectList.length);
+        let rosterCount = 0;
+        if (adminLike) {
+          rosterCount = normalized.length;
+        } else if (teacherClassKey) {
+          rosterCount = normalized.filter(
+            (st) => (st.classKey ?? canonicalClassKey(st.raw || st)) === teacherClassKey
+          ).length;
+        }
+
+        const subRes = await api.get('/api/subjects');
+        const subRaw = subRes.data;
+        const arr = Array.isArray(subRaw)
+          ? subRaw
+          : (Array.isArray(subRaw?.data) ? subRaw.data : (Array.isArray(subRaw?.subjects) ? subRaw.subjects : []));
+
+        const ownerKeys = ['createdBy', 'creator', 'owner', 'teacherUid', 'teacherId', 'staffId', 'userId', 'created_by'];
+        const userIds = [currentUser?.uid, currentUser?.id, currentUser?.email].filter(Boolean).map(String);
+        const mine = arr.filter((s) =>
+          ownerKeys.some((k) => s[k] && userIds.includes(String(s[k])))
+        );
+        const seen = new Set();
+        let subjectDedupeCount = 0;
+        for (const sub of mine) {
+          const key = String(sub.id || sub.name || '').toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          subjectDedupeCount += 1;
+        }
+
+        if (!cancelled) {
+          setAssignedStudentsCount(rosterCount);
+          setTeacherSubjectCount(subjectDedupeCount);
+        }
       } catch (e) {
-        console.warn('Failed to compute teacher subject count', e);
-        setTeacherSubjectCount(0);
+        if (!cancelled) {
+          setAssignedStudentsCount(0);
+          setTeacherSubjectCount(0);
+        }
       }
     };
 
-    fetchCounts();
-  }, [teacherProfile]);
+    loadRosterAndSubjectCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, userRole]);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -255,8 +243,12 @@ const TeacherDashboard = () => {
                phone: data.phone ?? '',
                subject: Array.isArray(subjectsArr) ? subjectsArr.join(', ') : '',
                subjectsCount: Array.isArray(subjectsArr) ? subjectsArr.length : 0,
-               // canonical assignedClass (lowercase, trimmed)
-               assignedClass: normalizeClassValue(data.assignedClass ?? data.classAssigned ?? data.class ?? data.assignedClassName ?? data.assignedClass?.name ?? ''),
+               assignedClass: normalizeClassLabel(
+                 resolveClassFromRecord({
+                   assignedClass:
+                     data.assignedClass ?? data.classAssigned ?? data.class ?? data.assignedClassName ?? data.assignedClass?.name
+                 })
+               ),
                studentsCount: data.studentsCount ?? normalizedStudents.length,
                 pictureSrc,
                 mustChangePassword: !!data.mustChangePassword,
@@ -264,10 +256,6 @@ const TeacherDashboard = () => {
              };
            };
 const normalized = normalize(data);
-// log normalized assigned class and student classes
-// (helps verify normalization and counts)
-console.log('Normalized teacher.assignedClass:', normalized.assignedClass);
-console.log('Normalized student.class list:', (normalized.raw?.students || []).map(s => s.class));
 setTeacherProfile(normalized);
          }
        } catch (err) {
@@ -312,14 +300,11 @@ setTeacherProfile(normalized);
   }, []);
 
 
-  // derive stats using fetched counts
   const assignedClassName = teacherProfile?.assignedClass || fallbackAssignedClass.name;
 
-  // total students: use fetched count (most accurate from API)
-  const totalStudents = assignedStudentsCount ?? fallbackAssignedClass.students;
+  const totalStudents = assignedStudentsCount === undefined ? '—' : assignedStudentsCount;
 
-  // subject count: use fetched count (most accurate from API)
-  const subjectCount = teacherSubjectCount ?? 0;
+  const subjectCount = teacherSubjectCount === undefined ? '—' : teacherSubjectCount;
 
   const upcomingEventsCount = Array.isArray(upcomingEvents) ? upcomingEvents.length : 0;
 
@@ -368,44 +353,41 @@ setTeacherProfile(normalized);
 
         if (!mounted) return;
 
-        // normalize teachers and students
-        const normTeachers = teachersList.map(t => {
-          const assigned = normalizeClassValue(t.assignedClass ?? t.classAssigned ?? t.class ?? t.assignedClassName ?? '');
-          return { ...t, assignedClass: assigned };
+        const normTeachers = teachersList.map((t) => {
+          const raw = t.assignedClass ?? t.classAssigned ?? t.class ?? t.assignedClassName ?? '';
+          const assigned = normalizeClassLabel(resolveClassFromRecord({ assignedClass: raw, class: raw }));
+          const classKey = canonicalClassKey(raw);
+          return { ...t, assignedClass: assigned, classKey };
         });
 
-        const normStudents = studentsList.map(s => {
-          const cls = normalizeClassValue(s.class ?? s.studentClass ?? s.className ?? s.grade ?? '');
-          return { ...s, class: cls };
+        const normStudents = studentsList.map((s) => {
+          const cls = normalizeClassLabel(resolveClassFromRecord(s));
+          const classKey = canonicalClassKey(s);
+          return { ...s, class: cls, classKey };
         });
 
-        // build quick lookup for classes -> teachers (could be multiple teachers per class)
         const classToTeachers = {};
-        normTeachers.forEach(t => {
-          const key = t.assignedClass || '__unassigned__';
+        normTeachers.forEach((t) => {
+          const key = t.classKey || '__unassigned__';
           classToTeachers[key] = classToTeachers[key] || [];
           classToTeachers[key].push(t);
         });
 
-        // prepare mapping teacherId -> matched students
         const teacherMatches = {};
-        // also track students that don't match any teacher assignedClass
         const unmatchedStudents = [];
 
-        const principalClasses = ['jss1','jss2','jss3','ss1','ss2','ss3'];
+        const principalClassKeys = ['jss1', 'jss2', 'jss3', 'ss1', 'ss2', 'ss3'];
 
-        // for each teacher compute matched students
         for (const t of normTeachers) {
           let matched = [];
-          if (t.assignedClass === 'admin') {
-            // admin sees all students
+          if (t.classKey === 'admin') {
             matched = [...normStudents];
-          } else if (t.assignedClass === 'principal') {
-            matched = normStudents.filter(s => principalClasses.includes(s.class));
-          } else if (t.assignedClass && t.assignedClass !== '') {
-            matched = normStudents.filter(s => s.class === t.assignedClass);
+          } else if (t.classKey === 'principal') {
+            matched = normStudents.filter((s) => principalClassKeys.includes(s.classKey));
+          } else if (t.classKey) {
+            matched = normStudents.filter((s) => s.classKey === t.classKey);
           } else {
-            matched = []; // no assigned class
+            matched = [];
           }
           teacherMatches[t.uid ?? t.id ?? (t.email || t.staffId || JSON.stringify(t))] = {
             teacher: t,
@@ -414,20 +396,11 @@ setTeacherProfile(normalized);
           };
         }
 
-        // find students that don't belong to any teacher's assignedClass (ignore admin/principal special)
-        const teacherAssignedSet = new Set(normTeachers.map(t => t.assignedClass).filter(Boolean));
+        const teacherAssignedSet = new Set(normTeachers.map((t) => t.classKey).filter(Boolean));
         for (const s of normStudents) {
-          // if any teacher assigned that class, consider matched
-          if (teacherAssignedSet.has(s.class)) continue;
-          // else student is unmatched
+          if (teacherAssignedSet.has(s.classKey)) continue;
           unmatchedStudents.push(s);
         }
-
-        // console output for debugging
-        console.log('Class comparison: teachers (normalized):', normTeachers.map(t => ({ uid: t.uid ?? t.id, assignedClass: t.assignedClass })));
-        console.log('Class comparison: students (normalized):', normStudents.map(s => ({ id: s.id ?? s.uid, class: s.class })));
-        console.log('Teacher -> matched students summary:', Object.fromEntries(Object.entries(teacherMatches).map(([k,v]) => [k, v.count])));
-        console.log('Unmatched students (no teacher assigned class found):', unmatchedStudents.map(s => ({ id: s.id ?? s.uid, class: s.class })));
 
         // store small summary in state for UI
         setClassComparison({
@@ -451,100 +424,87 @@ setTeacherProfile(normalized);
 
   return (
     <DashboardLayout title="Teacher Dashboard">
+      <div className="space-y-8">
+        <PageHeader
+          title="Overview"
+          description="Your class, subjects, and school calendar at a glance."
+        />
+
       {teacherProfile?.mustChangePassword && (
-        <div className="mb-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-          <div className="flex justify-between items-center">
+        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/90 p-4 shadow-sm ring-1 ring-amber-100">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-yellow-800">Please update your password</p>
-              <p className="text-sm text-yellow-700">
+              <p className="text-sm font-medium text-amber-900">Please update your password</p>
+              <p className="text-sm text-amber-800/90">
                 You're using the initial account password. For security, please change it now.
               </p>
             </div>
-            <div>
-              <button
-                onClick={() => navigate('/teacher/change-password')}
-                className="ml-4 inline-flex items-center px-3 py-1.5 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700"
-              >
-                Change Password
-              </button>
-            </div>
+            <Button type="button" size="sm" onClick={() => navigate('/teacher/change-password')}>
+              Change password
+            </Button>
           </div>
         </div>
       )}
 
-      <div className="mb-6">
-        <div className="bg-white shadow rounded-lg p-4 flex items-center space-x-4">
-          <div className="flex-shrink-0">
+      <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-6">
+          <div className="shrink-0">
             <img
               src={teacherProfile?.pictureSrc ?? '/images/default-avatar.png'}
-              alt="Profile"
-              className="h-16 w-16 rounded-full object-cover"
+              alt=""
+              className="h-16 w-16 rounded-2xl object-cover ring-2 ring-slate-100"
             />
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-medium text-gray-900">
-              {profileLoading ? 'Loading profile...' : (teacherProfile?.name || 'Teacher Name')}
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-semibold text-slate-900">
+              {profileLoading ? 'Loading profile…' : (teacherProfile?.name || 'Teacher')}
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-slate-500">
               {teacherProfile?.uid ? `Staff ID: ${teacherProfile.uid}` : currentUser?.uid}
             </p>
-            <p className="text-sm text-gray-500">
-              {teacherProfile?.email || '—'}
-            </p>
+            <p className="text-sm text-slate-500">{teacherProfile?.email || '—'}</p>
           </div>
-        </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map(stat => (
-          <div key={stat.name} className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className={`flex-shrink-0 rounded-md p-3 ${stat.color}`}>
+          <Card key={stat.name} padding={false} className="overflow-hidden border-slate-200/90 p-5 shadow-[var(--shadow-card)]">
+              <div className="flex items-center gap-4">
+                <div className={`flex shrink-0 rounded-xl p-3 ${stat.color}`}>
                   <div className="text-white">{stat.icon}</div>
                 </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      {stat.name}
-                    </dt>
-                    <dd>
-                      <div className="text-lg font-medium text-gray-900">
-                        {stat.value}
-                      </div>
-                    </dd>
-                  </dl>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{stat.name}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{stat.value}</p>
                 </div>
               </div>
-            </div>
-          </div>
+          </Card>
         ))}
       </div>
 
-      <div className="mt-6 bg-white shadow rounded-lg">
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-4 py-5 sm:px-6">
-            <h2 className="text-lg font-medium text-gray-900">Upcoming Events</h2>
+      <Card padding={false} className="overflow-hidden border-slate-200/90 shadow-[var(--shadow-card)]">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h2 className="text-base font-semibold text-slate-900">Upcoming events</h2>
+            <p className="text-xs text-slate-500">Visible to staff</p>
           </div>
-          <div className="border-t border-gray-200">
+          <div>
             {eventsLoading ? (
-              <div className="px-4 py-6 text-center text-gray-500">Loading events…</div>
+              <div className="px-5 py-10 text-center text-sm text-slate-500">Loading events…</div>
             ) : upcomingEvents.length === 0 ? (
-              <div className="px-4 py-6 text-center text-gray-500">No upcoming events for teachers.</div>
+              <div className="px-5 py-10 text-center text-sm text-slate-500">No upcoming events for teachers.</div>
             ) : (
-              <ul className="divide-y divide-gray-200">
+              <ul className="divide-y divide-slate-100">
                 {upcomingEvents.map(event => (
-                  <li key={event.id || event._id || `${event.title}-${event.date}`} className="px-4 py-4">
-                    <div className="flex items-center space-x-4">
-                      <div className="flex-shrink-0">
-                        <CalendarIcon className="h-6 w-6 text-orange-500" />
+                  <li key={event.id || event._id || `${event.title}-${event.date}`} className="px-5 py-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                        <CalendarIcon className="h-5 w-5" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{event.title || event.name || 'Untitled event'}</p>
-                        <p className="text-sm text-gray-500 truncate">
-                          {(event.class || event.forClass || event.targetClass || 'All Classes')} {event.date ? `| ${new Date(event.date).toLocaleDateString()}` : ''}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900">{event.title || event.name || 'Untitled event'}</p>
+                        <p className="text-sm text-slate-500">
+                          {(event.class || event.forClass || event.targetClass || 'All Classes')} {event.date ? ` · ${new Date(event.date).toLocaleDateString()}` : ''}
                         </p>
-                        {event.location && <p className="text-xs text-gray-400 truncate">{event.location}</p>}
+                        {event.location && <p className="text-xs text-slate-400">{event.location}</p>}
                       </div>
                     </div>
                   </li>
@@ -552,47 +512,45 @@ setTeacherProfile(normalized);
               </ul>
             )}
           </div>
+      </Card>
+
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Quick actions</h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => navigate('/teacher/results')}
+            className="group flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white p-4 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <ClipboardListIcon className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium text-slate-900">Add results</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/teacher/classes')}
+            className="group flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white p-4 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+              <UsersIcon className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium text-slate-900">Classes & students</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/teacher/attendance')}
+            className="group flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white p-4 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+              <CalendarIcon className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium text-slate-900">Attendance</span>
+          </button>
         </div>
       </div>
-
-      
-
-      <div className="mt-8">
-        <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
-        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <button className="bg-white overflow-hidden shadow rounded-lg hover:bg-gray-50 p-4">
-            <div className="flex items-center">
-              <div className="flex-shrink-0 bg-blue-100 rounded-md p-3">
-                <ClipboardListIcon className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <h3 className="text-sm font-medium text-gray-900">Add Results</h3>
-              </div>
-            </div>
-          </button>
-
-          <button className="bg-white overflow-hidden shadow rounded-lg hover:bg-gray-50 p-4">
-            <div className="flex items-center">
-              <div className="flex-shrink-0 bg-green-100 rounded-md p-3">
-                <UsersIcon className="h-6 w-6 text-green-600" />
-              </div>
-              <div className="ml-4">
-                <h3 className="text-sm font-medium text-gray-900">Students</h3>
-              </div>
-            </div>
-          </button>
-
-          <button className="bg-white overflow-hidden shadow rounded-lg hover:bg-gray-50 p-4">
-            <div className="flex items-center">
-              <div className="flex-shrink-0 bg-orange-100 rounded-md p-3">
-                <CalendarIcon className="h-6 w-6 text-orange-600" />
-              </div>
-              <div className="ml-4">
-                <h3 className="text-sm font-medium text-gray-900">Schedule Event</h3>
-              </div>
-            </div>
-          </button>
-        </div>
       </div>
     </DashboardLayout>
   );

@@ -4,14 +4,17 @@ import DashboardLayout from '../../components/DashboardLayout';
 import { PlusIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { API_BASE } from '../../config/api.js';
+import { fetchPortalSettings, updatePortalSettings } from '../../api/portalApi';
 
-const API_URL = "https://yms-backend-a2x4.onrender.com/api/scratch-cards"; // 🔥 update if deployed
-
-// const API_URL = import.meta.env.VITE_API_URL;
+const SCRATCH_CARDS_URL = `${API_BASE}/api/scratch-cards`;
 
 const ScratchCardManagement = () => {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scratchLoginEnabled, setScratchLoginEnabled] = useState(true);
+  const [portalSettingsLoading, setPortalSettingsLoading] = useState(true);
+  const [portalSaving, setPortalSaving] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [formData, setFormData] = useState({ quantity: 10 });
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,7 +36,7 @@ const ScratchCardManagement = () => {
   const fetchCards = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(API_URL);
+      const res = await axios.get(SCRATCH_CARDS_URL);
       const payload = res?.data;
 
       // Normalize various possible response shapes to an array
@@ -76,6 +79,37 @@ const ScratchCardManagement = () => {
     fetchCards();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPortalSettingsLoading(true);
+      try {
+        const s = await fetchPortalSettings();
+        if (!cancelled) setScratchLoginEnabled(s.scratchCardLoginEnabled !== false);
+      } catch {
+        if (!cancelled) toast.error('Could not load portal settings');
+      } finally {
+        if (!cancelled) setPortalSettingsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setScratchLogin = async (enabled) => {
+    setPortalSaving(true);
+    try {
+      await updatePortalSettings({ scratchCardLoginEnabled: enabled });
+      setScratchLoginEnabled(enabled);
+      toast.success(enabled ? 'Scratch card login enabled' : 'Scratch card login disabled');
+    } catch (e) {
+      toast.error(e.message || 'Could not update settings');
+    } finally {
+      setPortalSaving(false);
+    }
+  };
+
   // reset page when filters/search changes
   useEffect(() => {
     setCurrentPage(1);
@@ -96,7 +130,7 @@ const ScratchCardManagement = () => {
     }
 
     try {
-      const res = await axios.post(`${API_URL}/generate`, { quantity });
+      const res = await axios.post(`${SCRATCH_CARDS_URL}/generate`, { quantity });
       const newCards = Array.isArray(res.data) ? res.data : (res.data?.cards || []);
       setCards([...newCards, ...cards]); // prepend new cards
       setShowGenerateModal(false);
@@ -111,7 +145,7 @@ const ScratchCardManagement = () => {
   const handleDeleteCard = async (id) => {
     if (!confirm('Are you sure you want to delete this card?')) return;
     try {
-      await axios.delete(`${API_URL}/${id}`);
+      await axios.delete(`${SCRATCH_CARDS_URL}/${id}`);
       setCards(cards.filter((card) => getCardId(card) !== id));
       toast.success('Card deleted successfully!');
     } catch (err) {
@@ -154,6 +188,52 @@ const ScratchCardManagement = () => {
           <PlusIcon className="h-5 w-5 mr-2" />
           Generate Cards
         </button>
+      </div>
+
+      <div className="bg-white shadow rounded-lg p-6 mb-6 border border-gray-100">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Scratch card login</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              When disabled, students cannot sign in with a scratch card on the result portal. Password login (if
+              enabled in portal settings) still works.
+            </p>
+            <p className="mt-2 text-xs text-gray-400">
+              Full access mode (password only / scratch only / both) is configured under Admin → Portal access.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {portalSettingsLoading ? (
+              <span className="text-sm text-gray-500">Loading…</span>
+            ) : (
+              <>
+                <span
+                  className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
+                    scratchLoginEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {scratchLoginEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <button
+                  type="button"
+                  disabled={portalSaving || scratchLoginEnabled}
+                  onClick={() => setScratchLogin(true)}
+                  className="inline-flex items-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Enable scratch card login
+                </button>
+                <button
+                  type="button"
+                  disabled={portalSaving || !scratchLoginEnabled}
+                  onClick={() => setScratchLogin(false)}
+                  className="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Disable scratch card login
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Search + Filters */}

@@ -1,9 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { db } from "../../firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import bcrypt from "bcryptjs";
-import api from '../api/axios'; 
+import api from '../api/axios';
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -11,26 +9,11 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
-  // Removed unused isOffline state
 
-  // Load saved user from localStorage
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        // Optional: make Firestore use long polling (helps behind some proxies/firewalls)
-        try {
-          const { getFirestore } = await import('firebase/firestore');
-          const db = getFirestore();
-          if (db && typeof db.settings === 'function') {
-            db.settings({ experimentalForceLongPolling: true });
-          }
-        } catch {
-          // ignore if modular import or settings not available
-        }
-
-        // Attempt to read user from live backend (Firestore / auth) if configured
-        // If network is flaky this may throw (Firestore timeout); catch below.
         const saved = localStorage.getItem('schoolUser');
         if (saved && mounted) {
           try {
@@ -38,154 +21,111 @@ export const AuthProvider = ({ children }) => {
             setCurrentUser(parsed);
             setUserRole(parsed?.role ?? null);
           } catch {
-            // ignore parse errors
+            /* ignore */
           }
         }
-
-        // If you also do a realtime check against Firestore here, wrap it:
-        // Example:
-        // try { await someFirestoreCheck(); } catch(e) { throw e; }
-
-        if (mounted) {
-          setLoading(false);
-        }
-      } catch (err) {
-        // Firestore network/timeouts often surface as 'Could not reach Cloud Firestore backend' or code 'unavailable'
-        console.warn('[AuthContext] Firestore connectivity issue:', err?.message || err);
-        if (mounted) {
-          setLoading(false);
-          // keep any cached user loaded above; surface a small message to the user
-          try { toast.info('Offline: unable to reach auth backend — running from cache.'); } catch (_) {}
-        }
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
   }, []);
 
-  /**
-   * Staff login (Admin or Teacher)
-   */
   const login = async (uid, password) => {
     try {
-      // 🔹 1. Check Admins (using adminUid)
-      const adminsRef = collection(db, "admins");
-      const adminQ = query(adminsRef, where("adminUid", "==", uid));
-      const adminSnap = await getDocs(adminQ);
+      const { data: row } = await api.post('/api/auth/staff/login', {
+        uid: String(uid || '').trim(),
+        password: password ?? ''
+      });
 
-      if (!adminSnap.empty) {
-        const adminDoc = adminSnap.docs[0];
-        const adminData = adminDoc.data();
-
-        // password check
-        if (adminData.passwordHash) {
-          const passwordMatch = await bcrypt.compare(password, adminData.passwordHash);
-          if (!passwordMatch) return { success: false, message: "Incorrect password" };
-        } else if (adminData.password) {
-          if (password !== adminData.password) return { success: false, message: "Incorrect password" };
-        }
-
-        const loggedInAdmin = {
-          id: adminDoc.id,
-          name: adminData.name,
-          uid: adminData.adminUid,
-          role: "admin",
-          avatar: adminData.picture || null,
-        };
-
-        setCurrentUser(loggedInAdmin);
-        setUserRole("admin");
-        localStorage.setItem("schoolUser", JSON.stringify(loggedInAdmin));
-        return { success: true, user: loggedInAdmin };
+      if (!row || row.ok !== true) {
+        const msg = row?.message || 'Login failed';
+        return { success: false, message: msg };
       }
 
-      // 🔹 2. Check Teachers (using uid)
-      const teachersRef = collection(db, "teachers");
-      const teacherQ = query(teachersRef, where("uid", "==", uid));
-      const teacherSnap = await getDocs(teacherQ);
+      const role = row.role === 'admin' ? 'admin' : 'teacher';
+      const loggedIn = {
+        id: row.id,
+        name: row.name,
+        uid: row.uid,
+        role,
+        avatar: row.avatar ?? null
+      };
 
-      if (!teacherSnap.empty) {
-        const teacherDoc = teacherSnap.docs[0];
-        const teacherData = teacherDoc.data();
-
-        // Prevent disabled teachers from logging in
-        if (teacherData.status && String(teacherData.status).toLowerCase() === 'inactive') {
-          return { success: false, message: 'Your account has been disabled. Contact the admin.' };
-        }
-
-        if (teacherData.passwordHash) {
-          const passwordMatch = await bcrypt.compare(password, teacherData.passwordHash);
-          if (!passwordMatch) return { success: false, message: "Incorrect password" };
-        } else if (teacherData.password) {
-          if (password !== teacherData.password) return { success: false, message: "Incorrect password" };
-        }
-
-        const loggedInTeacher = {
-          id: teacherDoc.id,
-          name: teacherData.name,
-          uid: teacherData.uid,
-          role: teacherData.role || "teacher",
-          avatar: teacherData.avatar || null,
-        };
-
-        setCurrentUser(loggedInTeacher);
-        setUserRole("teacher");
-        localStorage.setItem("schoolUser", JSON.stringify(loggedInTeacher));
-        return { success: true, user: loggedInTeacher };
-      }
-
-      // If not found
-      return { success: false, message: "UID not found" };
+      setCurrentUser(loggedIn);
+      setUserRole(role);
+      localStorage.setItem('schoolUser', JSON.stringify(loggedIn));
+      return { success: true, user: loggedIn };
     } catch (err) {
-      console.error("Login error:", err);
-      return { success: false, message: "Failed to login. Try again." };
+      const body = err?.response?.data;
+      const msg =
+        body?.message ||
+        (typeof body === 'string' ? body : null) ||
+        err?.message ||
+        'Failed to login. Try again.';
+      if (err?.response?.status === 404) {
+        return { success: false, message: body?.message || 'UID not found' };
+      }
+      if (err?.response?.status === 401) {
+        return { success: false, message: body?.message || 'Incorrect password' };
+      }
+      if (err?.response?.status === 403) {
+        return { success: false, message: body?.message || 'Access denied' };
+      }
+      console.error('Login error:', err);
+      return { success: false, message: msg };
     }
   };
 
-  /**
-   * Student login (uid + password + full student data)
-   */
-  const studentLogin = async (uid, password, studentData = {}) => {
+  const studentLogin = (studentPayload = {}) => {
     try {
-      // Accept default password 'student123'
-      if (password !== 'student123') {
-        return { success: false, message: "Invalid password" };
+      const uid = studentPayload.uid || studentPayload.studentUid;
+      if (!uid) {
+        return { success: false, message: 'Invalid student session' };
       }
 
       const loggedInStudent = {
-        id: uid,
-        name: studentData.name || studentData.studentName || uid,
-        studentName: studentData.studentName || studentData.name || uid,
-        uid: uid,
-        role: "student",
-        class: studentData.class || studentData.studentClass || null,
-        studentClass: studentData.studentClass || studentData.class || null,
-        picture: studentData.picture || null,
-        fees: studentData.fees || { total: 0, paid: 0, pending: 0 },
+        id: studentPayload.id || uid,
+        name: studentPayload.name || studentPayload.studentName || uid,
+        studentName: studentPayload.name || uid,
+        uid,
+        role: 'student',
+        class: studentPayload.class || studentPayload.studentClass || null,
+        studentClass: studentPayload.class || null,
+        linNumber: studentPayload.linNumber || null,
+        picture: studentPayload.picture || null,
+        fees: studentPayload.fees || { total: 0, paid: 0, pending: 0 }
       };
 
       setCurrentUser(loggedInStudent);
-      setUserRole("student");
-      localStorage.setItem("schoolUser", JSON.stringify(loggedInStudent));
+      setUserRole('student');
+      localStorage.setItem('schoolUser', JSON.stringify(loggedInStudent));
       return { success: true, user: loggedInStudent };
     } catch (err) {
-      console.error("Student login error:", err);
-      return { success: false, message: "Failed to login. Try again." };
+      console.error('Student login error:', err);
+      return { success: false, message: 'Failed to login. Try again.' };
     }
   };
 
   const logout = () => {
     setCurrentUser(null);
     setUserRole(null);
-    localStorage.removeItem("schoolUser");
+    localStorage.removeItem('schoolUser');
+    if (isSupabaseConfigured) {
+      supabase.auth.signOut().catch(() => {});
+    }
   };
 
-  // Update currentUser fields (merge) and persist to localStorage
   const updateUserFields = (fields = {}) => {
     try {
-      setCurrentUser(prev => {
+      setCurrentUser((prev) => {
         if (!prev) return prev;
         const updated = { ...prev, ...fields };
-        try { localStorage.setItem('schoolUser', JSON.stringify(updated)); } catch {}
+        try {
+          localStorage.setItem('schoolUser', JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
         return updated;
       });
     } catch (e) {
@@ -202,7 +142,7 @@ export const AuthProvider = ({ children }) => {
         studentLogin,
         logout,
         updateUserFields,
-        loading,
+        loading
       }}
     >
       {!loading && children}
@@ -227,13 +167,26 @@ export const AppProvider = ({ children, user }) => {
   const cacheKey = user ? `yms_app_cache_${user.uid || user.id}` : 'yms_app_cache_anon';
 
   const saveCache = (payload) => {
-    try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
   };
   const loadCache = () => {
-    try { const raw = localStorage.getItem(cacheKey); return raw ? JSON.parse(raw) : null; } catch { return null; }
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
   };
   const clearCache = () => {
-    try { localStorage.removeItem(cacheKey); } catch {}
+    try {
+      localStorage.removeItem(cacheKey);
+    } catch {
+      /* ignore */
+    }
   };
 
   const loadAll = useCallback(async (opts = { force: false }) => {
@@ -245,15 +198,29 @@ export const AppProvider = ({ children, user }) => {
       }
     }
 
-    setData(d => ({ ...d, loading: true, error: null }));
+    setData((d) => ({ ...d, loading: true, error: null }));
     try {
-      const [sRes, rRes, subRes] = await Promise.all([
-        api.get('/api/students'),
+      const fetchAllStudents = async () => {
+        const acc = [];
+        let startAfter = null;
+        for (;;) {
+          const params = { limit: 1000 };
+          if (startAfter) params.startAfter = startAfter;
+          const res = await api.get('/api/students/all', { params });
+          const body = res.data || {};
+          const chunk = Array.isArray(body.data) ? body.data : [];
+          acc.push(...chunk);
+          if (!body.hasMore || !body.nextPageToken) break;
+          startAfter = body.nextPageToken;
+        }
+        return acc;
+      };
+
+      const [students, rRes, subRes] = await Promise.all([
+        fetchAllStudents(),
         api.get('/api/results'),
         api.get('/api/subjects')
       ]);
-
-      const students = Array.isArray(sRes.data) ? sRes.data : (sRes.data?.students || sRes.data?.data || []);
       const results = Array.isArray(rRes.data) ? rRes.data : (rRes.data?.results || rRes.data?.data || []);
       const subjects = Array.isArray(subRes.data) ? subRes.data : (subRes.data?.subjects || subRes.data?.data || []);
 
@@ -263,7 +230,7 @@ export const AppProvider = ({ children, user }) => {
       return payload;
     } catch (err) {
       console.error('AppProvider.loadAll error', err);
-      setData(d => ({ ...d, loading: false, error: err }));
+      setData((d) => ({ ...d, loading: false, error: err }));
       return null;
     }
   }, [user, cacheKey]);
@@ -271,22 +238,26 @@ export const AppProvider = ({ children, user }) => {
   useEffect(() => {
     if (!user) {
       setData({ students: [], results: [], subjects: [], loading: false, error: null, ts: null });
-      // clear cache on logout
       try {
-        Object.keys(localStorage).forEach(k => { if (k.startsWith('yms_app_cache_')) localStorage.removeItem(k); });
-      } catch {e}
+        Object.keys(localStorage).forEach((k) => {
+          if (k.startsWith('yms_app_cache_')) localStorage.removeItem(k);
+        });
+      } catch {
+        /* ignore */
+      }
       return;
     }
-    // load once on login (show cached immediately, refresh in background)
     loadAll({ force: false });
   }, [user, loadAll]);
 
   return (
-    <AppContext.Provider value={{
-      ...data,
-      reload: () => loadAll({ force: true }),
-      clearCache
-    }}>
+    <AppContext.Provider
+      value={{
+        ...data,
+        reload: () => loadAll({ force: true }),
+        clearCache
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

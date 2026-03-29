@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
 import { PlusIcon, TrashIcon, EyeIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE } from '../../config/api.js';
+import { PageHeader } from '../../components/ui/PageHeader';
 
 const SubjectManagement = () => {
   const [teacherList, setTeacherList] = useState([]);
@@ -13,7 +15,6 @@ const SubjectManagement = () => {
   const [teacherSubjects, setTeacherSubjects] = useState([]);
   const [modalAnimateIn, setModalAnimateIn] = useState(false);
   const [noAssignment, setNoAssignment] = useState(false);
-  const API_BASE = import.meta.env.VITE_API_URL
   // Load subjects from backend and group by teacher
   useEffect(() => {
     let mounted = true;
@@ -126,42 +127,40 @@ const SubjectManagement = () => {
   );
 
   return <DashboardLayout title="Subject Management">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <h1 className="text-2xl font-semibold text-gray-900">
-          Teacher Subjects
-        </h1>
-      </div>
+      <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader
+        title="Teacher subjects"
+        description="Subjects grouped by teacher. Search and open a row to view or remove entries."
+      />
 
-      {/* Search */}
-      <div className="bg-white shadow rounded-lg p-4 sm:p-6 mb-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
-          <div className="w-full sm:w-96">
+      <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[var(--shadow-card)] sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="w-full sm:max-w-md">
             <label htmlFor="search" className="sr-only">Search</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <svg className="h-5 w-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                   <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
                 </svg>
               </div>
-              <input id="search" name="search" className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="Search by teacher name or ID" type="search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              <input id="search" name="search" className="input-yms pl-10" placeholder="Search by teacher name or ID" type="search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Teachers Table (desktop) */}
-      <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[var(--shadow-card)]">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 hidden sm:table table-fixed">
-            <thead className="bg-gray-50">
+          <table className="hidden min-w-full table-fixed divide-y divide-slate-100 sm:table">
+            <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(241_245_249)]">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UID</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subjects Count</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Teacher</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">UID</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Subjects</th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="divide-y divide-slate-100 bg-white">
               {filteredTeachers.map(teacher => <tr key={String(teacher.id || teacher.uid)}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
@@ -213,6 +212,7 @@ const SubjectManagement = () => {
             </div>
           ))}
         </div>
+      </div>
       </div>
 
       {/* View Subjects Modal */}

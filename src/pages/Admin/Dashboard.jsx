@@ -1,13 +1,30 @@
 // src/pages/Admin/Dashboard.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import DashboardLayout from '../../components/DashboardLayout';
-import { UserIcon, UsersIcon, BookOpenIcon, ClipboardListIcon, CreditCardIcon, BellIcon, CalendarIcon, PlusIcon, TrashIcon } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import {
+  UserIcon,
+  UsersIcon,
+  BookOpenIcon,
+  ClipboardListIcon,
+  CreditCardIcon,
+  CalendarIcon,
+  PlusIcon,
+  TrashIcon,
+  GraduationCap,
+  ArrowRight,
+  LayoutGrid,
+  Sparkles,
+  Lock,
+} from 'lucide-react';
 import { toast } from 'sonner';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { API_BASE } from '../../config/api.js';
 
 const AdminDashboard = () => {
+  const { currentUser } = useAuth();
+  const adminName = currentUser?.name || currentUser?.fullName || 'Admin';
+
   // hydrate from last-session snapshot for instant UI
   const _cachedSnapshot = (() => {
     try { return JSON.parse(sessionStorage.getItem('dashboardData') || 'null'); } catch { return null; }
@@ -25,11 +42,8 @@ const AdminDashboard = () => {
   const [teachersCount, setTeachersCount] = useState(() => _cachedSnapshot?.teachersCount ?? null);
   const [studentsCount, setStudentsCount] = useState(() => _cachedSnapshot?.studentsCount ?? null);
   const [classesMap, setClassesMap] = useState(() => _cachedSnapshot?.classesMap ?? {}); // { className: count }
-  const [studentIssues, setStudentIssues] = useState(() => _cachedSnapshot?.studentIssues ?? []); // students with missing fields
-  const [notifications, setNotifications] = useState(() => _cachedSnapshot?.notifications ?? []); // notifications state
-  const [notificationsError, setNotificationsError] = useState(null);
-  const [deletingId, setDeletingId] = useState(null); // id of event being deleted
-  const [resultsList, setResultsList] = useState(() => _cachedSnapshot?.results ?? []);
+  const [studentIssues, setStudentIssues] = useState(() => _cachedSnapshot?.studentIssues ?? []);
+  const [deletingId, setDeletingId] = useState(null);
   const [resultsCount, setResultsCount] = useState(() => _cachedSnapshot?.resultsCount ?? null);
 
   // Loading state for teacher/student/class related UI
@@ -68,61 +82,10 @@ const AdminDashboard = () => {
     return issues;
   };
 
-  // track previous notifications and reload once per session when notifications first appear
-  const prevNotificationsCountRef = useRef(0);
-  const checkAndReloadForNotifications = (formatted) => {
-    try {
-      const count = Array.isArray(formatted) ? formatted.length : 0;
-      const alreadyReloaded = sessionStorage.getItem('reloadedForNotifications') === '1';
-      if (count > 0 && !alreadyReloaded && prevNotificationsCountRef.current === 0) {
-        sessionStorage.setItem('reloadedForNotifications', '1');
-        setTimeout(() => window.location.reload(), 50);
-      }
-      prevNotificationsCountRef.current = count;
-    } catch (e) {
-      // ignore
-    }
-  };
-
-  // detect notification variant to colour the bell icon
-  const detectNotificationVariant = (n) => {
-    if (!n) return 'default';
-    const text = ((n.title || n.message || n.body || n.text || '') + '').toLowerCase();
-    const action = ((n.action || n.type || n.event || n.kind) + '').toLowerCase();
-    const status = ((n.status || n.success || '') + '').toLowerCase();
-
-    // explicit status checks first
-    if (/failed|error|unsuccessful|not sent|not delivered/.test(status) || /fail|failed|error|unsuccessful|not sent|not delivered/.test(text + ' ' + action)) return 'failed';
-    if (/delete|removed|deleted|remove/.test(action) || /delete|removed|deleted|remove/.test(text)) return 'delete';
-    if (/create|created|added|new|joined|registered/.test(action) || /create|created|added|new|joined|registered/.test(text)) return 'create';
-
-    // fallback based on boolean-ish status
-    if (status === 'false' || status === '0') return 'failed';
-    if (status === 'true' || status === '1' || status === 'ok' || status === 'success') {
-      if (/create|created|added|new/.test(text + ' ' + action)) return 'create';
-      return 'default';
-    }
-    return 'default';
-  };
-
-  // Fetch events / teachers / students / notifications in parallel (single, fast load)
+  // Fetch events / teachers / students / results in parallel (single, fast load)
   useEffect(() => {
     const ac = new AbortController();
     const signal = ac.signal;
-
-    const formatDateTime = (ts) => {
-      if (!ts) return '';
-      if (ts && typeof ts.toDate === 'function') {
-        try { return ts.toDate().toLocaleString(); } catch (e) { /* ignore */ }
-      }
-      if (typeof ts === 'number') {
-        const ms = ts < 1e12 ? ts * 1000 : ts;
-        return new Date(ms).toLocaleString();
-      }
-      const parsed = new Date(ts);
-      if (!isNaN(parsed)) return parsed.toLocaleString();
-      return '';
-    };
 
     const findFirstArray = (obj, depth = 0) => {
       if (!obj || depth > 4) return null;
@@ -150,7 +113,6 @@ const AdminDashboard = () => {
 
     const loadAll = async () => {
       setEventsLoading(true);
-      setNotificationsError(null);
       // ensure we ask backend for total student count
       try {
         const raw = sessionStorage.getItem('dashboardData');
@@ -162,8 +124,6 @@ const AdminDashboard = () => {
             if (typeof cached.studentsCount === 'number') setStudentsCount(cached.studentsCount);
             if (cached.classesMap && typeof cached.classesMap === 'object') setClassesMap(cached.classesMap);
             if (Array.isArray(cached.studentIssues)) setStudentIssues(cached.studentIssues);
-            if (Array.isArray(cached.notifications)) setNotifications(cached.notifications);
-            if (Array.isArray(cached.results)) setResultsList(cached.results);
             if (typeof cached.resultsCount === 'number') setResultsCount(cached.resultsCount);
             // show UI immediately from cache, but still continue to refresh below
             setStatsLoading(false);
@@ -176,19 +136,17 @@ const AdminDashboard = () => {
 
       try {
         // include students count and also fetch results
-        const [eventsRes, tRes, sRes, nRes, rRes] = await Promise.all([
+        const [eventsRes, tRes, sRes, rRes] = await Promise.all([
           fetch(`${API_BASE}/api/events`, { signal }),
           fetch(`${API_BASE}/api/teachers`, { signal }),
-          fetch(`${API_BASE}/api/students?includeTotal=1`, { signal }), // request totalCount
-          fetch(`${API_BASE}/api/notifications`, { signal }),
+          fetch(`${API_BASE}/api/students?includeTotal=1`, { signal }),
           fetch(`${API_BASE}/api/results`, { signal })
         ]);
 
-        const [eventsJson, tJson, sJson, nJson, rJson] = await Promise.all([
+        const [eventsJson, tJson, sJson, rJson] = await Promise.all([
           eventsRes.ok ? eventsRes.json().catch(() => []) : [],
           tRes.ok ? tRes.json().catch(() => null) : null,
           sRes.ok ? sRes.json().catch(() => null) : null,
-          nRes.ok ? nRes.json().catch(() => []) : [],
           rRes.ok ? rRes.json().catch(() => []) : []
         ]);
 
@@ -218,41 +176,7 @@ const AdminDashboard = () => {
 
         // results (show count + recent list)
         const resultsArray = Array.isArray(rJson) ? rJson : (Array.isArray(rJson.data) ? rJson.data : []);
-        setResultsList(resultsArray);
         setResultsCount(resultsArray.length);
-
-        // notifications
-        const notificationsArray = Array.isArray(nJson) ? nJson : (Array.isArray(nJson.data) ? nJson.data : []);
-        // map notifications in chunks / idle time so first paint is not blocked
-        chunkedMap(notificationsArray, (n) => {
-          const id = n.id || n._id || n.uid || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
-          const title = n.title || n.subject || n.heading || 'Notification';
-          const message = n.message || n.body || n.text || (n.payload && n.payload.message) || 'No message provided';
-          const rawTimestamp = n.createdAt ?? n.timestamp ?? n.time ?? n.date ?? n.created_at ?? null;
-          const variant = detectNotificationVariant(n);
-          return {
-            id,
-            title,
-            message,
-            time: rawTimestamp ? formatDateTime(rawTimestamp) : (n.time || 'Just now'),
-            raw: n,
-            read: Boolean(n.read || n.isRead || n.read_at),
-            variant
-          };
-        }, { chunkSize: 150 }).then((formatted) => {
-          formatted.sort((a, b) => {
-            const aT = new Date(a.raw.createdAt ?? a.raw.timestamp ?? a.raw.time ?? a.time).getTime() || 0;
-            const bT = new Date(b.raw.createdAt ?? b.raw.timestamp ?? b.raw.time ?? b.time).getTime() || 0;
-            return bT - aT;
-          });
-          setNotifications(formatted);
-          checkAndReloadForNotifications(formatted);
-        }).catch(() => {
-          // fallback quick sync map on failure
-          const fallback = notificationsArray.map(n => ({ id: n.id || n._id, title: n.title || 'Notification', message: n.message || n.body || '', time: formatDateTime(n.createdAt) || 'Just now', raw: n, read: !!(n.read), variant: detectNotificationVariant(n) }));
-          setNotifications(fallback);
-          checkAndReloadForNotifications(fallback);
-        });
 
         // Persist a lightweight snapshot to sessionStorage for faster next load
         try {
@@ -262,7 +186,6 @@ const AdminDashboard = () => {
             studentsCount: typeof sJson?.totalCount === 'number' ? sJson.totalCount : (Array.isArray(students) ? students.length : (students?.length ?? null)),
             classesMap: map,
             studentIssues: buildStudentIssues(students),
-            notifications: notifications,
             results: resultsArray,
             resultsCount: resultsArray.length
           };
@@ -279,8 +202,6 @@ const AdminDashboard = () => {
         setStudentsCount(null);
         setClassesMap({});
         setStudentIssues([]);
-        setNotifications([]);
-        setNotificationsError(err?.message || 'Failed to load data');
       } finally {
         setEventsLoading(false);
       }
@@ -290,209 +211,60 @@ const AdminDashboard = () => {
     return () => { ac.abort(); };
   }, []);
 
-  // Refresh notifications periodically (best-effort; now every second)
-  useEffect(() => {
-    const ac = new AbortController();
-    const signal = ac.signal;
-    let isFetching = false; // prevent overlapping requests
-
-    const formatDateTime = (ts) => {
-      if (!ts) return '';
-      if (ts && typeof ts.toDate === 'function') {
-        try { return ts.toDate().toLocaleString(); } catch (e) {}
-      }
-      if (typeof ts === 'number') {
-        const ms = ts < 1e12 ? ts * 1000 : ts;
-        return new Date(ms).toLocaleString();
-      }
-      const parsed = new Date(ts);
-      if (!isNaN(parsed)) return parsed.toLocaleString();
-      return '';
-    };
-
-    const normalizeArray = (payload) => {
-      if (!payload) return [];
-      if (Array.isArray(payload)) return payload;
-      if (Array.isArray(payload.data)) return payload.data;
-      for (const k of ['notifications', 'items', 'results', 'list']) {
-        if (Array.isArray(payload[k])) return payload[k];
-      }
-      for (const v of Object.values(payload)) {
-        if (Array.isArray(v)) return v;
-      }
-      return [];
-    };
-
-    const fetchAndSet = async () => {
-      if (isFetching) return;
-      isFetching = true;
-      try {
-        const res = await fetch(`${API_BASE}/api/notifications`, { signal });
-        if (!res.ok) {
-          setNotifications([]);
-          return;
-        }
-        const data = await res.json().catch(() => []);
-        const arr = normalizeArray(data);
-        const formatted = arr.map((n) => {
-          const id = n.id || n._id || n.uid || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
-          const title = n.title || n.subject || n.heading || 'Notification';
-          const message = n.message || n.body || n.text || (n.payload && n.payload.message) || 'No message provided';
-          const rawTimestamp = n.createdAt ?? n.timestamp ?? n.time ?? n.date ?? n.created_at ?? null;
-          const variant = detectNotificationVariant(n);
-          return {
-            id,
-            title,
-            message,
-            time: rawTimestamp ? formatDateTime(rawTimestamp) : (n.time || 'Just now'),
-            raw: n,
-            read: Boolean(n.read || n.isRead || n.read_at),
-            variant
-          };
-        });
-        formatted.sort((a, b) => {
-          const aT = new Date(a.raw.createdAt ?? a.raw.timestamp ?? a.raw.time ?? a.time).getTime() || 0;
-          const bT = new Date(b.raw.createdAt ?? b.raw.timestamp ?? b.raw.time ?? b.time).getTime() || 0;
-          return bT - aT;
-        });
-        // set notifications asynchronously so JSON parsing / mapping yields to the browser first
-        setTimeout(() => {
-          setNotifications((prev) => {
-            if (prev.length === formatted.length && prev.every((p, i) => p.id === formatted[i].id && p.read === formatted[i].read)) return prev;
-            return formatted;
-          });
-          checkAndReloadForNotifications(formatted);
-        }, 0);
-      } catch (err) {
-        if (err && err.name === 'AbortError') return;
-        console.error('Failed to fetch notifications', err);
-        setNotifications([]);
-      } finally {
-        isFetching = false;
-      }
-    };
-
-    // initial fetch then periodic refresh every 1s
-    fetchAndSet();
-    const t = setInterval(fetchAndSet, 10000); // poll every 10s (less pressure)
-    return () => {
-      ac.abort();
-      clearInterval(t);
-    };
-  }, []);
-
-  // compute stats memoized to avoid recreating on every render
   const stats = React.useMemo(() => ([
-    { name: 'Total Teachers', value: teachersCount ?? '…', icon: <UserIcon className="h-6 w-6" />, color: 'bg-blue-500' },
-    { name: 'Total Students', value: studentsCount ?? '…', icon: <UsersIcon className="h-6 w-6" />, color: 'bg-green-500' },
-    { name: 'Total Classes', value: Object.keys(classesMap).length ?? '…', icon: <BookOpenIcon className="h-6 w-6" />, color: 'bg-yellow-500' },
-    { name: 'Published Results', value: resultsCount ?? '…', icon: <ClipboardListIcon className="h-6 w-6" />, color: 'bg-purple-500' }
+    {
+      name: 'Teachers',
+      description: 'Staff on record',
+      value: teachersCount ?? '—',
+      icon: UserIcon,
+      accent: 'from-sky-500 to-blue-600',
+      ring: 'ring-sky-500/20',
+    },
+    {
+      name: 'Students',
+      description: 'Enrolled learners',
+      value: studentsCount ?? '—',
+      icon: UsersIcon,
+      accent: 'from-emerald-500 to-teal-600',
+      ring: 'ring-emerald-500/20',
+    },
+    {
+      name: 'Classes',
+      description: 'Active class groups',
+      value: Object.keys(classesMap).length ?? '—',
+      icon: GraduationCap,
+      accent: 'from-amber-500 to-orange-600',
+      ring: 'ring-amber-500/20',
+    },
+    {
+      name: 'Results',
+      description: 'Published records',
+      value: resultsCount ?? '—',
+      icon: ClipboardListIcon,
+      accent: 'from-violet-500 to-indigo-600',
+      ring: 'ring-violet-500/20',
+    },
   ]), [teachersCount, studentsCount, classesMap, resultsCount]);
 
-  // Fetch events from API
-  useEffect(() => {
-    setEventsLoading(true);
-    fetch(`${API_BASE}/api/events`)
-      .then(res => res.json())
-      .then(data => {
-        setEvents(Array.isArray(data) ? data : []);
-        setEventsLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch events", err);
-        setEvents([]);
-        setEventsLoading(false);
-      });
-  }, []);
-  // Note: single consolidated fetch handles events/teachers/students/notifications above.
-  // Removed duplicate events-only fetch to avoid conflicting requests
+  const quickLinks = [
+    { to: '/admin/teachers', label: 'Teachers', sub: 'Hire & profiles', icon: UserIcon },
+    { to: '/admin/students', label: 'Students', sub: 'Enrollment', icon: UsersIcon },
+    { to: '/admin/subjects', label: 'Subjects', sub: 'Curriculum', icon: BookOpenIcon },
+    { to: '/admin/results', label: 'Results', sub: 'Grades & reports', icon: ClipboardListIcon },
+    { to: '/admin/scratch-cards', label: 'Scratch cards', sub: 'Access codes', icon: CreditCardIcon },
+    { to: '/admin/portal-settings', label: 'Portal access', sub: 'Student login', icon: Lock },
+    { to: '/admin/class-assignment', label: 'Class assignment', sub: 'Rosters', icon: LayoutGrid },
+  ];
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 
-  // Fetch teachers and students, compute counts and unique classes (no repetition)
-  useEffect(() => {
-    let mounted = true;
-
-    // Find the first array anywhere inside the response object (tolerant)
-    const findFirstArray = (obj, depth = 0) => {
-      if (!obj || depth > 4) return null;
-      if (Array.isArray(obj)) return obj;
-      if (typeof obj !== 'object') return null;
-      for (const v of Object.values(obj)) {
-        if (Array.isArray(v)) return v;
-      }
-      for (const v of Object.values(obj)) {
-        const found = findFirstArray(v, depth + 1);
-        if (found) return found;
-      }
-      return null;
-    };
-
-    const normalizeArray = (payload) => {
-      if (!payload) return [];
-      if (Array.isArray(payload)) return payload;
-      if (Array.isArray(payload.teachers)) return payload.teachers;
-      if (Array.isArray(payload.students)) return payload.students;
-      if (Array.isArray(payload.data)) return payload.data;
-      if (Array.isArray(payload.data?.students)) return payload.data.students;
-      // fallback: search recursively for the first array
-      const found = findFirstArray(payload);
-      return found || [];
-    };
-
-    const fetchData = async () => {
-      try {
-        const [tRes, sRes] = await Promise.all([
-          fetch(`${API_BASE}/api/teachers`),
-          fetch(`${API_BASE}/api/students`)
-        ]);
-        const tJson = await tRes.json().catch(() => null);
-        const sJson = await sRes.json().catch(() => null);
-
-        const teachers = normalizeArray(tJson);
-        const students = normalizeArray(sJson);
-
-        // debug if students exist but not shown
-        if (import.meta.env.DEV) {
-          console.debug('Teachers response (raw):', tJson);
-          console.debug('Students response (raw):', sJson);
-          console.debug('Normalized students count:', students.length);
-        }
-
-        if (!mounted) return;
-        setTeachersCount(teachers.length);
-        setStudentsCount(students.length);
-
-        // build classes map without repetition, count students per class
-        const map = {};
-        const issues = [];
-        students.forEach((st) => {
-          // tolerant name/email/class extraction
-          const name = st.name || st.fullName || `${st.firstName || ''} ${st.lastName || ''}`.trim();
-          const email = st.email || st.emailAddress || st.contactEmail || '';
-          const cls = (st.class || st.className || st.classroom || st.grade || st.class_group || st.classNameRaw || '').toString().trim();
-
-          // Only report missing-class issues — stop reporting "missing name or email"
-          if (!cls) {
-            issues.push({ id: st.id || st.uid || st._id || name || '(unknown)', problem: 'no class assigned', raw: st });
-            return;
-          }
-
-          map[cls] = (map[cls] || 0) + 1;
-
-          // keep a dev-only debug log for missing name/email, but don't surface as an issue
-          if (import.meta.env.DEV && (!name || !email)) {
-            console.debug('Student missing name/email (dev-only):', { id: st.id || st.uid || st._id, name, email, raw: st });
-          }
-        });
-        setClassesMap(map);
-        setStudentIssues(issues);
-      } catch (err) {
-        console.error('Failed loading teacher/student stats', err);
-      }
-    };
-    fetchData();
-    return () => { mounted = false; };
-  }, []);
   // Handle event form input changes
   const handleEventFormChange = e => {
     const {
@@ -560,233 +332,250 @@ const AdminDashboard = () => {
       setDeletingId(null);
     }
   };
-  // Add handler to mark a notification read locally and attempt server update
-  // Place this inside the component (before return)
-  const markNotificationRead = async (id) => {
-    setNotifications((prev) => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    // best-effort server call; ignore failures
-    try {
-      await fetch(`${API_BASE}/api/notifications/${id}/read`, { method: 'POST' });
-    } catch (e) {
-      // ignore
-    }
-  };
-  return <DashboardLayout title="Admin Dashboard">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map(stat => <div key={stat.name} className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className={`flex-shrink-0 rounded-md p-3 ${stat.color}`}>
-                  <div className="text-white">{stat.icon}</div>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">
-                      {stat.name}
-                    </dt>
-                    <dd>
-                      <div className="text-lg font-medium text-gray-900">
-                        {statsLoading ? <span className="text-gray-500">Loading…</span> : stat.value}
-                      </div>
-                    </dd>
-                  </dl>
-                </div>
+  return (
+    <DashboardLayout title="Overview">
+      <div className="space-y-8">
+        <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 px-6 py-8 text-white shadow-lg ring-1 ring-white/10 sm:px-10 sm:py-10">
+          <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-sky-500/15 blur-3xl" />
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-emerald-200 ring-1 ring-white/20">
+                <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Administration
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
+                {greeting}, {adminName}
+              </h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-300 sm:text-base">
+                Yetland Management School — monitor enrollment, academics, and daily operations from one dashboard.
+              </p>
+              <p className="mt-3 text-sm text-slate-400">{todayLabel}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3 rounded-xl bg-white/5 p-4 ring-1 ring-white/10">
+              <div className="rounded-lg bg-emerald-500/20 p-2.5 text-emerald-300">
+                <GraduationCap className="h-8 w-8" aria-hidden />
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</p>
+                <p className="text-lg font-semibold">Live sync</p>
               </div>
             </div>
-          </div>)}
-      </div>
+          </div>
+        </section>
 
-      <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Classes summary (unique classes, counts) */}
-        <div className="bg-white shadow rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium text-gray-900">Classes</h2>
-            <div className="text-sm text-gray-500">{statsLoading ? 'Loading…' : `${Object.keys(classesMap).length} classes`}</div>
-          </div>
-          <div className="divide-y divide-gray-100 max-h-60 overflow-auto">
-            {statsLoading ? (
-              <div className="text-sm text-gray-500 p-3">Loading classes…</div>
-            ) : Object.keys(classesMap).length === 0 ? (
-              <div className="text-sm text-gray-500 p-3">No classes found.</div>
-            ) : (
-              Object.entries(classesMap).map(([cls, cnt]) => (
-                <div key={cls} className="py-2 flex items-center justify-between">
-                  <div className="text-sm font-medium text-gray-900">{cls}</div>
-                  <div className="text-sm text-gray-500">{cnt} student{cnt > 1 ? 's' : ''}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Student data issues */}
-        <div className="bg-white shadow rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium text-gray-900">Student data checks</h2>
-            <div className="text-sm text-red-600">{statsLoading ? 'Loading…' : `${studentIssues.length} issue(s)`}</div>
-          </div>
-          {statsLoading ? (
-            <div className="text-sm text-gray-500 p-3">Loading student checks…</div>
-          ) : studentIssues.length === 0 ? (
-            <div className="text-sm text-gray-500">All students look OK.</div>
-          ) : (
-            <ul className="divide-y divide-gray-100 max-h-60 overflow-auto">
-              {studentIssues.map((issue, idx) => (
-                <li key={`${issue.uid}-${idx}`} className="py-2 text-sm text-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{issue.name}</div>
-                      <div className="text-xs text-gray-500">{issue.uid || '—'}</div>
-                      <div className="text-xs text-red-600">{issue.problem}</div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        console.log('Problem student raw:', issue.raw);
-                        toast('Opened student in console (inspect raw data)');
-                      }}
-                      className="text-xs text-green-600 hover:underline"
-                    >
-                      Inspect
-                    </button>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {stats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div
+                key={stat.name}
+                className={`group relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm ring-1 ${stat.ring} transition hover:shadow-md`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{stat.name}</p>
+                    <p className="mt-1 text-xs text-slate-400">{stat.description}</p>
+                    <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-slate-900">
+                      {statsLoading ? <span className="text-lg font-normal text-slate-400">Loading…</span> : stat.value}
+                    </p>
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${stat.accent} text-white shadow-md`}>
+                    <Icon className="h-6 w-6" aria-hidden />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-         {/* Notifications */}
-         <div className="bg-white shadow rounded-lg">
-          <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
-            <h2 className="text-lg font-medium text-gray-900">
-              Recent Notifications
-            </h2>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-              {notifications.filter(n => !n.read).length} unread
-            </span>
+
+        <div>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Quick access</h2>
           </div>
-          <div className="border-t border-gray-200">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {quickLinks.map((link) => {
+              const QuickIcon = link.icon;
+              return (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50 hover:shadow-md"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition group-hover:bg-indigo-600 group-hover:text-white">
+                    <QuickIcon className="h-5 w-5" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900">{link.label}</p>
+                    <p className="text-xs text-slate-500">{link.sub}</p>
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-600" aria-hidden />
+              </Link>
+            );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                <h2 className="text-base font-semibold text-slate-900">Classes</h2>
+                <span className="text-xs font-medium text-slate-500">
+                  {statsLoading ? '…' : `${Object.keys(classesMap).length} groups`}
+                </span>
+              </div>
+              <div className="max-h-72 overflow-auto px-2">
+                {statsLoading ? (
+                  <div className="px-3 py-8 text-center text-sm text-slate-500">Loading classes…</div>
+                ) : Object.keys(classesMap).length === 0 ? (
+                  <div className="px-3 py-8 text-center text-sm text-slate-500">No class data yet.</div>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {Object.entries(classesMap).map(([cls, cnt]) => (
+                      <li key={cls} className="flex items-center justify-between gap-3 px-3 py-3">
+                        <span className="text-sm font-medium text-slate-900">{cls}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                          {cnt} learner{cnt === 1 ? '' : 's'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                <h2 className="text-base font-semibold text-slate-900">Data quality</h2>
+                <span className={`text-xs font-medium ${studentIssues.length ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {statsLoading ? '…' : `${studentIssues.length} issue${studentIssues.length === 1 ? '' : 's'}`}
+                </span>
+              </div>
+              <div className="max-h-72 overflow-auto px-2">
+                {statsLoading ? (
+                  <div className="px-3 py-8 text-center text-sm text-slate-500">Checking records…</div>
+                ) : studentIssues.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-sm text-slate-600">
+                    All student records look complete for tracked fields.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {studentIssues.map((issue, idx) => (
+                      <li key={`${issue.uid}-${idx}`} className="px-3 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-900">{issue.name || '—'}</p>
+                            <p className="text-xs text-slate-500">{issue.uid || '—'}</p>
+                            <p className="mt-1 text-xs text-rose-600">{issue.problem}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              console.log('Problem student raw:', issue.raw);
+                              toast('Details logged to the browser console');
+                            }}
+                            className="shrink-0 text-xs font-medium text-emerald-700 hover:underline"
+                          >
+                            Inspect
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">School calendar</h2>
+              <p className="text-xs text-slate-500">Events visible to staff where applicable</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAddEventModal(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              <PlusIcon className="h-4 w-4" aria-hidden />
+              Add event
+            </button>
+          </div>
+          <div>
             {!showHeavyLists ? (
-              <div className="px-4 py-6 text-center text-gray-500">Loading notifications…</div>
+              <div className="px-5 py-12 text-center text-sm text-slate-500">Loading events…</div>
+            ) : eventsLoading ? (
+              <div className="px-5 py-12 text-center text-sm text-slate-500">Loading events…</div>
+            ) : events.length === 0 ? (
+              <div className="px-5 py-12 text-center text-sm text-slate-500">
+                No scheduled events. Add one to keep teachers and admins aligned.
+              </div>
             ) : (
-              <ul className="divide-y divide-gray-200">
-                {notifications.map(notification => <li
-                    key={notification.id}
-                    onClick={() => !notification.read && markNotificationRead(notification.id)}
-                    className={`px-4 py-4 cursor-pointer ${!notification.read ? 'bg-green-50' : ''}`}
-                  >
-                    <div className="flex items-center space-x-4">
-                      <div className="flex-shrink-0">
-                        <BellIcon className={`h-6 w-6 ${
-                          notification.variant === 'delete' ? 'text-red-500' :
-                          notification.variant === 'create' ? 'text-green-500' :
-                          notification.variant === 'failed' ? 'text-yellow-500' :
-                          (!notification.read ? 'text-green-500' : 'text-gray-400')
-                        }`} />
+              <ul className="divide-y divide-slate-100">
+                {events.map((event) => (
+                  <li key={event.id} className="px-5 py-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex gap-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
+                          <CalendarIcon className="h-5 w-5" aria-hidden />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-900">{event.title}</p>
+                          <p className="mt-0.5 text-sm text-slate-600">
+                            {new Date(event.date).toLocaleDateString(undefined, {
+                              weekday: 'long',
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            })}
+                          </p>
+                          {event.description && <p className="mt-2 text-sm text-slate-600">{event.description}</p>}
+                          {event.forTeachers && (
+                            <span className="mt-2 inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-100">
+                              Visible to teachers
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">
-                          {notification.title}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {notification.message}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {notification.time}
-                        </p>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEvent(event.id)}
+                        disabled={deletingId === event.id}
+                        className={`self-start rounded-lg p-2 text-rose-600 transition hover:bg-rose-50 ${deletingId === event.id ? 'cursor-not-allowed opacity-50' : ''}`}
+                        aria-label="Delete event"
+                      >
+                        <TrashIcon className="h-5 w-5" />
+                      </button>
                     </div>
-                  </li>)}
+                  </li>
+                ))}
               </ul>
             )}
           </div>
         </div>
-
-        {/* Upcoming Events */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
-            <h2 className="text-lg font-medium text-gray-900">
-              Upcoming Events
-            </h2>
-            <button type="button" onClick={() => setShowAddEventModal(true)} className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-              <PlusIcon className="h-4 w-4 mr-1" />
-              Add Event
-            </button>
-          </div>
-          <div className="border-t border-gray-200">
-            {!showHeavyLists ? (
-              <div className="px-4 py-4 text-center text-gray-500">Loading events…</div>
-            ) : eventsLoading ? (
-              <div className="px-4 py-4 text-center text-gray-500">Loading events…</div>
-            ) : events.length === 0 ? (
-               <div className="px-4 py-4 text-center text-gray-500">
-                 No upcoming events. Click "Add Event" to create one.
-               </div>
-             ) : (
-               <ul className="divide-y divide-gray-200">
-                 {events.map(event => (
-                   <li key={event.id} className="px-4 py-4">
-                     <div className="flex items-center justify-between">
-                       <div className="flex items-center space-x-4">
-                         <div className="flex-shrink-0">
-                           <CalendarIcon className="h-6 w-6 text-orange-500" />
-                         </div>
-                         <div className="flex-1 min-w-0">
-                           <p className="text-sm font-medium text-gray-900">
-                             {event.title}
-                           </p>
-                           <p className="text-sm text-gray-500">
-                             {new Date(event.date).toLocaleDateString('en-US', {
-                               weekday: 'long',
-                               year: 'numeric',
-                               month: 'long',
-                               day: 'numeric'
-                             })}
-                           </p>
-                           {event.description && <p className="text-sm text-gray-500 mt-1">
-                             {event.description}
-                           </p>}
-                           {event.forTeachers && <span className="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                             Visible to Teachers
-                           </span>}
-                         </div>
-                       </div>
-                       <div>
-                         <button
-                           onClick={() => handleDeleteEvent(event.id)}
-                           disabled={deletingId === event.id}
-                           className={`text-red-600 hover:text-red-900 ${deletingId === event.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-                           aria-disabled={deletingId === event.id}
-                         >
-                           <TrashIcon className="h-5 w-5" />
-                         </button>
-                       </div>
-                     </div>
-                   </li>
-                 ))}
-               </ul>
-             )}
-           </div>
-        </div>
       </div>
 
-      {/* Add Event Modal */}
       {showAddEventModal && (
-  <div className="fixed inset-0 z-10 flex items-center justify-center overflow-y-auto">
-    <div className="fixed inset-0 bg-gray-500 opacity-75" aria-hidden="true"></div>
-
-    <div className="relative z-20 inline-block align-middle bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:max-w-lg sm:w-full">
-      <form onSubmit={handleAddEvent}>
-        <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-          <div className="sm:flex sm:items-start">
-            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
-                Add New Event
-              </h3>
-              <div className="mt-6 space-y-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto p-4">
+          <button
+            type="button"
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+            aria-label="Close modal"
+            onClick={() => setShowAddEventModal(false)}
+          />
+          <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5">
+            <form onSubmit={handleAddEvent}>
+              <div className="border-b border-slate-100 px-6 py-5">
+                <h3 className="text-lg font-semibold text-slate-900">Schedule an event</h3>
+                <p className="mt-1 text-sm text-slate-500">Appears on the admin dashboard and optionally for teachers.</p>
+              </div>
+              <div className="space-y-5 px-6 py-6">
                 <div>
-                  <label htmlFor="title" className="block text-sm font-medium text-gray-700">
-                    Event Title
+                  <label htmlFor="title" className="block text-sm font-medium text-slate-700">
+                    Title
                   </label>
                   <input
                     type="text"
@@ -795,25 +584,25 @@ const AdminDashboard = () => {
                     required
                     value={eventForm.title}
                     onChange={handleEventFormChange}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm focus:border-green-500 focus:ring-green-500"
+                    className="mt-1.5 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
                 <div>
-                  <label htmlFor="date" className="block text-sm font-medium text-gray-700">
-                    Event Date
+                  <label htmlFor="date" className="block text-sm font-medium text-slate-700">
+                    Date
                   </label>
                   <input
                     type="date"
                     name="date"
                     id="date"
-                    required 
+                    required
                     value={eventForm.date}
                     onChange={handleEventFormChange}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm focus:border-green-500 focus:ring-green-500"
+                    className="mt-1.5 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
                 <div>
-                  <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                  <label htmlFor="description" className="block text-sm font-medium text-slate-700">
                     Description
                   </label>
                   <textarea
@@ -822,47 +611,43 @@ const AdminDashboard = () => {
                     rows={3}
                     value={eventForm.description}
                     onChange={handleEventFormChange}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm focus:border-green-500 focus:ring-green-500"
+                    className="mt-1.5 block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
                   <input
                     id="forTeachers"
                     name="forTeachers"
                     type="checkbox"
                     checked={eventForm.forTeachers}
                     onChange={handleEventFormChange}
-                    className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                   />
-                  <label htmlFor="forTeachers" className="ml-2 block text-sm text-gray-900">
-                    Make visible to teachers
+                  <label htmlFor="forTeachers" className="text-sm text-slate-800">
+                    Visible to teachers
                   </label>
                 </div>
               </div>
-            </div>
+              <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddEventModal(false)}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                >
+                  Save event
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-
-        <div className="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-          <button
-            type="submit"
-            className="inline-flex w-full justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm"
-          >
-            Add Event
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowAddEventModal(false)}
-            className="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-)}
-
-    </DashboardLayout>;
+      )}
+    </DashboardLayout>
+  );
 };
 export default AdminDashboard;
