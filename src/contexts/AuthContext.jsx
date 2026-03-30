@@ -204,7 +204,7 @@ export const AppProvider = ({ children, user }) => {
         const acc = [];
         let startAfter = null;
         for (;;) {
-          const params = { limit: 1000 };
+          const params = { limit: 5000 };
           if (startAfter) params.startAfter = startAfter;
           const res = await api.get('/api/students/all', { params });
           const body = res.data || {};

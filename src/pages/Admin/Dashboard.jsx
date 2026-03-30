@@ -111,6 +111,31 @@ const AdminDashboard = () => {
       return found || [];
     };
 
+    const fetchAllStudentsPaged = async () => {
+      const acc = [];
+      let startAfter = null;
+      for (;;) {
+        const u = new URL(`${API_BASE}/api/students/all`);
+        u.searchParams.set('limit', '5000');
+        if (startAfter) u.searchParams.set('startAfter', startAfter);
+        const res = await fetch(u.toString(), { signal });
+        if (!res.ok) break;
+        const j = await res.json().catch(() => null);
+        const chunk = Array.isArray(j?.data) ? j.data : [];
+        acc.push(...chunk);
+        if (!j?.hasMore || !j?.nextPageToken) break;
+        startAfter = j.nextPageToken;
+      }
+      return acc;
+    };
+
+    const fetchStudentCountExact = async () => {
+      const res = await fetch(`${API_BASE}/api/students/count`, { signal });
+      if (!res.ok) return null;
+      const j = await res.json().catch(() => null);
+      return typeof j?.total === 'number' ? j.total : null;
+    };
+
     const loadAll = async () => {
       setEventsLoading(true);
       // ensure we ask backend for total student count
@@ -135,18 +160,17 @@ const AdminDashboard = () => {
       }
 
       try {
-        // include students count and also fetch results
-        const [eventsRes, tRes, sRes, rRes] = await Promise.all([
+        const [eventsRes, tRes, rRes, studentsList, exactTotal] = await Promise.all([
           fetch(`${API_BASE}/api/events`, { signal }),
           fetch(`${API_BASE}/api/teachers`, { signal }),
-          fetch(`${API_BASE}/api/students?includeTotal=1`, { signal }),
-          fetch(`${API_BASE}/api/results`, { signal })
+          fetch(`${API_BASE}/api/results`, { signal }),
+          fetchAllStudentsPaged(),
+          fetchStudentCountExact()
         ]);
 
-        const [eventsJson, tJson, sJson, rJson] = await Promise.all([
+        const [eventsJson, tJson, rJson] = await Promise.all([
           eventsRes.ok ? eventsRes.json().catch(() => []) : [],
           tRes.ok ? tRes.json().catch(() => null) : null,
-          sRes.ok ? sRes.json().catch(() => null) : null,
           rRes.ok ? rRes.json().catch(() => []) : []
         ]);
 
@@ -155,14 +179,9 @@ const AdminDashboard = () => {
 
         // teachers & students
         const teachers = normalizeArray(tJson);
-        const students = normalizeArray(sJson);
+        const students = Array.isArray(studentsList) ? studentsList : [];
         setTeachersCount(teachers.length);
-        // prefer server-provided totalCount when available
-        if (sJson && (typeof sJson.totalCount === 'number')) {
-          setStudentsCount(sJson.totalCount);
-        } else {
-          setStudentsCount(students.length);
-        }
+        setStudentsCount(exactTotal != null ? exactTotal : students.length);
 
         // compute classes map and student issues once (use helper)
         const map = {};
@@ -180,10 +199,11 @@ const AdminDashboard = () => {
 
         // Persist a lightweight snapshot to sessionStorage for faster next load
         try {
+          const countForCache = exactTotal != null ? exactTotal : students.length;
           const snapshot = {
             events: Array.isArray(eventsJson) ? eventsJson : (eventsJson && Array.isArray(eventsJson.data) ? eventsJson.data : []),
             teachersCount: Array.isArray(teachers) ? teachers.length : (teachers?.length ?? null),
-            studentsCount: typeof sJson?.totalCount === 'number' ? sJson.totalCount : (Array.isArray(students) ? students.length : (students?.length ?? null)),
+            studentsCount: countForCache,
             classesMap: map,
             studentIssues: buildStudentIssues(students),
             results: resultsArray,

@@ -340,16 +340,32 @@ setTeacherProfile(normalized);
 
     (async () => {
       try {
-        const [tRes, sRes] = await Promise.all([
+        const fetchAllStudents = async () => {
+          const acc = [];
+          let startAfter = null;
+          for (;;) {
+            const u = new URL(`${API_BASE}/api/students/all`);
+            u.searchParams.set('limit', '5000');
+            if (startAfter) u.searchParams.set('startAfter', startAfter);
+            const res = await fetch(u.toString(), { signal: ac.signal });
+            if (!res.ok) break;
+            const j = await res.json().catch(() => null);
+            const chunk = Array.isArray(j?.data) ? j.data : [];
+            acc.push(...chunk);
+            if (!j?.hasMore || !j?.nextPageToken) break;
+            startAfter = j.nextPageToken;
+          }
+          return acc;
+        };
+
+        const [tRes, studentsList] = await Promise.all([
           fetch(`${API_BASE}/api/teachers`, { signal: ac.signal }),
-          fetch(`${API_BASE}/api/students`, { signal: ac.signal })
+          fetchAllStudents()
         ]);
 
         const tJson = tRes.ok ? await tRes.json().catch(() => null) : null;
-        const sJson = sRes.ok ? await sRes.json().catch(() => null) : null;
 
         const teachersList = Array.isArray(tJson) ? tJson : (Array.isArray(tJson?.data) ? tJson.data : (Array.isArray(tJson?.teachers) ? tJson.teachers : []));
-        const studentsList = Array.isArray(sJson) ? sJson : (Array.isArray(sJson?.data) ? sJson.data : (Array.isArray(sJson?.students) ? sJson.students : []));
 
         if (!mounted) return;
 

@@ -486,7 +486,7 @@ const Login = () => {
                       {showPasswordOption && (
                         <form onSubmit={handlePasswordAuth} className="space-y-3 rounded-xl border border-slate-100 p-4">
                           <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                            <User className="h-4 w-4 text-slate-500" />
+                            <UserRound className="h-4 w-4 text-slate-500" />
                             Password login
                           </div>
                           <div className="relative">
